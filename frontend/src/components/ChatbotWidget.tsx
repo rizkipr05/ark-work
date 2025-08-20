@@ -17,11 +17,6 @@ type Profile = {
 /* ===================== Consts ===================== */
 const STORAGE_KEY = 'ogm-chat-history-v1';
 const PROFILE_KEY = 'ogm-chat-profile-v1';
-
-/**
- * By default we hit /api/chat (create it on your side).
- * You can override via prop <ChatbotWidget chatApi="/api/arkwork/agent" />
- */
 const DEFAULT_CHAT_API = '/api/chat';
 
 /* ===================== Utils ===================== */
@@ -66,9 +61,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
       if (raw) setMsgs(JSON.parse(raw));
       const p = localStorage.getItem(PROFILE_KEY);
       if (p) setProfile(JSON.parse(p));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   /* ---------- save history & profile ---------- */
@@ -132,9 +125,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
       try {
         const data = await res.json();
         reply = (res.ok && (data.answer || data.message)) || reply;
-      } catch {
-        // non-JSON response
-      }
+      } catch {}
 
       const a: Msg = { id: rid(), role: 'assistant', text: reply, ts: Date.now() };
       setMsgs((m) => [...m, a]);
@@ -156,6 +147,14 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
     ask(input);
   }
 
+  /* ---------- reset chat ---------- */
+  function resetChat() {
+    setMsgs([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+  }
+
   /* ===================== UI ===================== */
   return (
     <>
@@ -163,7 +162,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Buka ArkWork Agent"
-        className="fixed bottom-5 right-5 z-50 rounded-full h-14 w-14 shadow-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:scale-[1.03] transition grid place-items-center"
+        className="fixed bottom-5 right-5 z-50 rounded-full h-14 w-14 shadow-lg border border-neutral-200 bg-black text-white hover:scale-105 transition grid place-items-center"
       >
         <svg viewBox="0 0 24 24" className="h-7 w-7">
           <path d="M12 2v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -176,19 +175,13 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
 
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-24 right-5 z-50 w-[min(92vw,380px)] rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-2xl overflow-hidden">
+        <div className="fixed bottom-24 right-5 z-50 w-[min(92vw,380px)] rounded-3xl border border-neutral-200 bg-white shadow-2xl overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 bg-gray-50">
             <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-500 grid place-items-center">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white">
-                  <rect x="5" y="7" width="14" height="10" rx="3" fill="currentColor" />
-                  <circle cx="10" cy="12" r="1" fill="#111" />
-                  <circle cx="14" cy="12" r="1" fill="#111" />
-                </svg>
-              </div>
+              <div className="h-8 w-8 rounded-xl bg-black grid place-items-center text-white font-bold text-xs">AW</div>
               <div>
-                <div className="font-semibold text-neutral-900 dark:text-neutral-100">ArkWork Agent</div>
+                <div className="font-semibold text-neutral-900">ArkWork Agent</div>
                 <div className="text-xs text-neutral-500">Berita • Kerja • Konsultasi</div>
               </div>
             </div>
@@ -196,13 +189,18 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowProfile(true)}
-                className="px-2 py-1 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                title="Profil"
+                className="px-2 py-1 text-xs rounded-lg border border-neutral-300 hover:bg-neutral-200"
               >
                 Profil
               </button>
               <button
-                className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                onClick={resetChat}
+                className="px-2 py-1 text-xs rounded-lg border border-neutral-300 hover:bg-neutral-200"
+              >
+                Reset
+              </button>
+              <button
+                className="p-2 rounded-lg hover:bg-neutral-200"
                 onClick={() => setOpen(false)}
                 aria-label="Tutup"
               >
@@ -214,7 +212,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
           </div>
 
           {/* Mode chips */}
-          <div className="px-3 py-2 flex gap-2 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="px-3 py-2 flex gap-2 border-b border-neutral-200 bg-gray-50">
             {[
               { k: 'news', label: 'Berita' },
               { k: 'jobs', label: 'Kerja' },
@@ -227,9 +225,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
                   onClick={() => setIntent(m.k as any)}
                   className={[
                     'px-3 py-1.5 rounded-full text-xs border transition',
-                    active
-                      ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border-transparent'
-                      : 'border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800',
+                    active ? 'bg-black text-white border-black' : 'border-neutral-300 hover:bg-neutral-200',
                   ].join(' ')}
                 >
                   {m.label}
@@ -241,14 +237,14 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
           {/* Messages */}
           <div ref={listRef} className="max-h-[50vh] overflow-y-auto px-3 py-3 space-y-2">
             {msgs.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-4 text-sm text-neutral-600 dark:text-neutral-400">
+              <div className="rounded-xl border border-dashed border-neutral-300 p-4 text-sm text-neutral-600">
                 Mulai percakapan. Contoh:
                 <div className="mt-2 flex flex-wrap gap-2">
                   {suggestions.map((s) => (
                     <button
                       key={s}
                       onClick={() => ask(s)}
-                      className="rounded-full border px-3 py-1 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800 border-neutral-300 dark:border-neutral-700"
+                      className="rounded-full border px-3 py-1 text-xs hover:bg-neutral-100 border-neutral-300"
                     >
                       {s}
                     </button>
@@ -258,15 +254,11 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
             ) : (
               msgs.map((m) => (
                 <div key={m.id} className={['flex items-end gap-2', m.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}>
-                  {m.role === 'assistant' && (
-                    <div className="h-7 w-7 shrink-0 rounded-lg bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-500" />
-                  )}
+                  {m.role === 'assistant' && <div className="h-7 w-7 shrink-0 rounded-lg bg-black text-white grid place-items-center text-xs">AW</div>}
                   <div
                     className={[
                       'max-w-[80%] rounded-2xl px-3 py-2 text-sm',
-                      m.role === 'user'
-                        ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
-                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100',
+                      m.role === 'user' ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-900',
                     ].join(' ')}
                   >
                     <div className="whitespace-pre-wrap">{m.text}</div>
@@ -278,16 +270,14 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
 
             {busy && (
               <div className="flex items-end gap-2">
-                <div className="h-7 w-7 shrink-0 rounded-lg bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-500" />
-                <div className="bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-2xl px-3 py-2 text-sm">
-                  mengetik<span className="animate-pulse">…</span>
-                </div>
+                <div className="h-7 w-7 shrink-0 rounded-lg bg-black text-white grid place-items-center text-xs">AW</div>
+                <div className="bg-neutral-100 text-neutral-900 rounded-2xl px-3 py-2 text-sm">mengetik<span className="animate-pulse">…</span></div>
               </div>
             )}
           </div>
 
           {/* Input */}
-          <form onSubmit={onSubmit} className="border-t border-neutral-200 dark:border-neutral-800 p-3">
+          <form onSubmit={onSubmit} className="border-t border-neutral-200 p-3 bg-gray-50">
             <div className="flex items-center gap-2">
               <input
                 value={input}
@@ -299,11 +289,11 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
                     ? 'Ceritakan situasi/tujuanmu…'
                     : 'Tanya berita/konteks migas…'
                 }
-                className="flex-1 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
+                className="flex-1 rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-400"
               />
               <button
                 disabled={!input.trim() || busy}
-                className="rounded-xl px-3 py-2 text-sm font-medium bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 disabled:opacity-60"
+                className="rounded-xl px-3 py-2 text-sm font-medium bg-black text-white disabled:opacity-60"
               >
                 Kirim
               </button>
@@ -341,10 +331,10 @@ function ProfileSheet({
   return (
     <div className="fixed inset-0 z-50 grid place-items-end pointer-events-none">
       <div className="absolute inset-0 bg-black/30 pointer-events-auto" onClick={onClose} />
-      <div className="relative m-4 w-[min(92vw,380px)] pointer-events-auto rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl p-4">
+      <div className="relative m-4 w-[min(92vw,380px)] pointer-events-auto rounded-2xl border border-neutral-200 bg-white shadow-xl p-4">
         <div className="flex items-center justify-between mb-2">
           <div className="font-semibold">Profil ArkWork</div>
-          <button onClick={onClose} aria-label="Tutup" className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800">
+          <button onClick={onClose} aria-label="Tutup" className="p-2 rounded-lg hover:bg-neutral-100">
             <svg viewBox="0 0 24 24" className="h-5 w-5">
               <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
@@ -366,10 +356,10 @@ function ProfileSheet({
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border border-neutral-300 dark:border-neutral-700">
+          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border border-neutral-300">
             Batal
           </button>
-          <button onClick={() => onSave(form)} className="px-3 py-2 text-sm rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
+          <button onClick={() => onSave(form)} className="px-3 py-2 text-sm rounded-lg bg-black text-white">
             Simpan
           </button>
         </div>
@@ -397,7 +387,7 @@ function Input({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
+        className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
       />
     </label>
   );

@@ -194,7 +194,7 @@ export default function AuthPage() {
                     required
                     autoComplete="username email"
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                    placeholder="you@example.com atau employer_username"
+                    placeholder="you@example.com"
                   />
                 </label>
 

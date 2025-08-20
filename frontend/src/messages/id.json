@@ -1,6 +1,5 @@
-{     
-
-  "signupperushaan":{},
+{
+  "signupperushaan": {},
   "companySignup": {
     "title": "Buat Akun Perusahaan",
     "subtitle": "Kelola lowongan dan rekrut talenta terbaik di ArkWork.",
@@ -52,8 +51,7 @@
     }
   },
 
-  
- "halaman-home": {},
+  "halaman-home": {},
 
   "nav": {
     "home": "Beranda",
@@ -75,6 +73,7 @@
   "cta": {
     "energy": "Jelajahi Update Energi"
   },
+
   "home": {
     "hero": {
       "title": { "1": "Majukan Kariermu di", "2": "Sektor Energi" },
@@ -109,6 +108,7 @@
       "note": "Tanpa kartu kredit • Daftar kurang dari 1 menit"
     }
   },
+
   "lang": { "switch": "Ganti bahasa" },
   "menu": { "open": "Buka menu", "close": "Tutup menu", "user": "Buka menu pengguna" },
 
@@ -132,7 +132,7 @@
   },
 
   "Halaman-about": {},
-  
+
   "about": {
     "title": "Tentang",
     "intro": "ArkWork adalah platform inovatif yang menghubungkan lowongan kerja, tender, dan kabar industri dengan profesional serta bisnis di sektor energi.",
@@ -165,7 +165,6 @@
     }
   },
 
-
   "Halaman-signin": {},
 
   "signin": {
@@ -189,7 +188,6 @@
       "google": "Gagal masuk dengan Google."
     }
   },
-
 
   "Halaman-signup": {},
 
@@ -236,20 +234,33 @@
 
   "dashboard": {
     "greeting": "Hai, {name}!",
+    "greetingSmall": "Selamat datang kembali",
+    "hero": {
+      "subtitle": "Lihat aktivitasmu dan lengkapi profil untuk rekomendasi yang lebih akurat."
+    },
+    "cta": {
+      "findJobs": "Cari Lowongan"
+    },
     "fallback": { "there": "kamu", "job": "Lowongan" },
     "profile": {
       "title": "Profil Saya",
       "desc": "Lengkapi profil untuk rekomendasi lowongan yang lebih akurat",
-      "cta": "Ubah Profil"
+      "cta": "Ubah Profil",
+      "badge": "Rekomendasi lebih akurat",
+      "stats": {
+        "profile": "Profil",
+        "cv": "CV",
+        "skills": "Keahlian"
+      }
     },
     "recent": {
       "title": "Aktivitas Terbaru",
       "empty": "Belum ada aktivitas",
       "item": "Melamar ke {title} — {date}",
-      "viewAll": "Lihat Semua"
+      "viewAll": "Lihat Semua",
+      "cta": { "findJobs": "Cari Lowongan" }
     }
   },
-
 
   "Halaman-jobs": {},
 
@@ -304,7 +315,6 @@
     "readMore": "Baca Selengkapnya",
     "empty": "Tidak ada artikel.",
     "error": { "load": "Gagal memuat berita" },
-
     "scope": {
       "id": "Cakupan: Indonesia",
       "global": "Cakupan: Global",
@@ -313,7 +323,6 @@
     "lang": { "id": "Bahasa: ID", "en": "Bahasa: EN" },
     "country": { "id": "Negara: ID", "us": "Negara: US" },
     "limit": { "n": "Batas: {n}" },
-
     "keywords": { "placeholder": "Kata kunci kustom (opsional)" },
     "btn": { "fetch": "Ambil Berita", "loading": "Memuat…" },
     "quick": { "placeholder": "Saring cepat judul/sumber…", "clear": "Hapus Saringan" },
@@ -340,12 +349,25 @@
     },
     "actions": {
       "save": "Simpan Profil",
-      "download": "Unduh"
+      "download": "Unduh",
+      "view": "Lihat",
+      "remove": "Hapus",
+      "chooseFile": "Pilih File",
+      "changePhoto": "Ubah Foto",
+      "uploading": "Mengunggah..."
+    },
+    "hints": {
+      "docPreview": "Preview inline hanya untuk PDF. DOC/DOCX dibuka/diunduh di tab baru.",
+      "noCvYet": "Belum ada CV terunggah."
     },
     "toast": {
       "saved": "Profil berhasil diperbarui!",
       "notFound": "Pengguna tidak ditemukan di data lokal.",
-      "failed": "Gagal menyimpan profil."
+      "failed": "Gagal menyimpan profil.",
+      "cvUploaded": "CV berhasil diunggah.",
+      "cvRemoved": "CV dihapus.",
+      "cvTypeNotAllowed": "File harus PDF/DOC/DOCX.",
+      "cvTooLarge": "Ukuran maksimum {size}MB"
     }
   },
 
@@ -419,7 +441,4 @@
     "results": "{count} hasil",
     "participate": { "alert": "Berminat ikut serta: {title}\nSilakan unggah dokumen pada langkah berikutnya." }
   }
-
-
-
 }

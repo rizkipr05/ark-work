@@ -14,11 +14,11 @@ type StoredUser = {
   email: string;
   name?: string;
   profile?: {
-    location?: string;
+    location?: string;          // <- sekarang dari dropdown
     phone?: string;
-    skills?: string;
+    skills?: string;            // <- CSV dari multi-select
     cv?: CvMeta;
-    photo?: AvatarMeta; // metadata avatar (blob di IndexedDB)
+    photo?: AvatarMeta;
   };
   createdAt?: string;
   updatedAt?: string;
@@ -27,12 +27,105 @@ type StoredUser = {
 const LS_KEY = 'ark_users';
 const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:'; // dataURL thumbnail utk navbar
 const MAX_CV_MB = 2;
-const MAX_AVATAR_MB = 2; // foto max 2MB
+const MAX_AVATAR_MB = 2;
 
 const ALLOWED_CV_TYPES = [
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+
+/** ====== Opsi Filter (Indonesia + O&G) ====== */
+const LOCATION_OPTIONS = [
+  'Aceh',
+  'Sumatera Utara',
+  'Sumatera Barat',
+  'Riau',
+  'Kepulauan Riau',
+  'Jambi',
+  'Sumatera Selatan',
+  'Kepulauan Bangka Belitung',
+  'Bengkulu',
+  'Lampung',
+  'DKI Jakarta',
+  'Jawa Barat',
+  'Banten',
+  'Jawa Tengah',
+  'DI Yogyakarta',
+  'Jawa Timur',
+  'Bali',
+  'Nusa Tenggara Barat',
+  'Nusa Tenggara Timur',
+  'Kalimantan Barat',
+  'Kalimantan Tengah',
+  'Kalimantan Selatan',
+  'Kalimantan Timur',
+  'Kalimantan Utara',
+  'Sulawesi Utara',
+  'Sulawesi Tengah',
+  'Sulawesi Selatan',
+  'Sulawesi Tenggara',
+  'Gorontalo',
+  'Sulawesi Barat',
+  'Maluku',
+  'Maluku Utara',
+  'Papua',
+  'Papua Barat',
+  'Papua Barat Daya',
+  'Papua Selatan',
+  'Papua Tengah',
+  'Papua Pegunungan',
+  'Remote',
+];
+
+const SKILL_OPTIONS = [
+  'Reservoir Engineering',
+  'Drilling Engineer',
+  'Completion Engineer',
+  'Well Intervention / Workover',
+  'Production Engineer',
+  'Process Engineer (Upstream)',
+  'Process Engineer (Downstream)',
+  'Piping Engineer',
+  'Pipeline Engineer',
+  'Mechanical (Static)',
+  'Mechanical (Rotating)',
+  'Electrical Engineer',
+  'Instrumentation & Control',
+  'Automation / DCS / PLC',
+  'HSE / HSEQ',
+  'QA/QC',
+  'Construction',
+  'Pre-commissioning / Commissioning',
+  'Operations',
+  'Maintenance',
+  'Reliability',
+  'Subsea',
+  'Offshore',
+  'Onshore',
+  'Flow Assurance',
+  'SURF',
+  'FPSO',
+  'LNG',
+  'Gas Processing',
+  'Refinery',
+  'Petrochemical',
+  'Geologist',
+  'Geophysicist',
+  'Mud Logging',
+  'Petrophysicist',
+  'EOR',
+  'Corrosion / Cathodic Protection',
+  'Welding / NDT',
+  'Fabrication',
+  'Marine',
+  'Procurement',
+  'Contracts',
+  'Supply Chain / Logistics',
+  'Planning / Scheduling (Primavera P6)',
+  'Cost Control',
+  'Document Control',
+  'Project Management',
 ];
 
 /** ================== IndexedDB utils ================== */
@@ -134,7 +227,7 @@ function ToastBanner({ toast, onClose }: { toast: Toast; onClose: () => void }) 
   );
 }
 
-/** ================== Image helpers (thumbnail untuk navbar) ================== */
+/** ================== Image helpers ================== */
 async function fileToThumbDataURL(file: File | Blob, maxSize = 160): Promise<string> {
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const url = URL.createObjectURL(file);
@@ -162,27 +255,26 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  // Single source of truth untuk email — hindari “possibly null”
   const email = user?.email ?? null;
   const notSignedIn = !email;
 
   const [name, setName] = useState('');
-  const [location, setLocation] = useState('');
+  const [location, setLocation] = useState(''); // dropdown value
   const [phone, setPhone] = useState('');
-  const [skills, setSkills] = useState('');
+  const [skillTags, setSkillTags] = useState<string[]>([]); // multi-select
 
   const [cvMeta, setCvMeta] = useState<CvMeta>(null);
   const [cvUrl, setCvUrl] = useState<string | null>(null);
 
   const [avatarMeta, setAvatarMeta] = useState<AvatarMeta>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null); // preview besar
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [busySave, setBusySave] = useState(false);
   const [busyUploadCV, setBusyUploadCV] = useState(false);
   const [busyUploadAvatar, setBusyUploadAvatar] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
 
-  // Redirect aman (tanpa mengubah urutan hooks)
+  // Redirect aman
   useEffect(() => {
     if (notSignedIn) {
       const id = setTimeout(() => router.replace('/auth/signin'), 50);
@@ -205,7 +297,14 @@ export default function ProfilePage() {
     setName(u?.name ?? '');
     setLocation(u?.profile?.location ?? '');
     setPhone(u?.profile?.phone ?? '');
-    setSkills(u?.profile?.skills ?? '');
+    // parse skills csv -> array
+    const skillsCSV = u?.profile?.skills ?? '';
+    setSkillTags(
+      skillsCSV
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
     setCvMeta(u?.profile?.cv ?? null);
     setAvatarMeta(u?.profile?.photo ?? null);
   }, [email]);
@@ -243,9 +342,6 @@ export default function ProfilePage() {
       if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
   }, [avatarMeta?.key]);
-
-  const tags = useMemo(() => skills.split(',').map((s) => s.trim()).filter(Boolean), [skills]);
-  const isPdf = cvMeta?.type === 'application/pdf';
 
   /** ========== Actions ========== */
   async function onPickCv(file: File) {
@@ -338,10 +434,12 @@ export default function ProfilePage() {
       const users = readUsers();
       const now = new Date().toISOString();
       const idx = users.findIndex((x) => x.email === email);
+      // simpan skills sebagai CSV
+      const skillsCSV = skillTags.join(', ');
       const data: StoredUser = {
         email,
         name,
-        profile: { location, phone, skills, cv: cvMeta, photo: avatarMeta },
+        profile: { location, phone, skills: skillsCSV, cv: cvMeta, photo: avatarMeta },
         createdAt: idx >= 0 ? users[idx].createdAt : now,
         updatedAt: now,
       };
@@ -378,7 +476,6 @@ export default function ProfilePage() {
 
   /** ========== UI ========== */
 
-  // Fallback UI saat user belum login (tetap render — tidak mengubah jumlah hooks)
   if (notSignedIn) {
     return (
       <div className="grid min-h-[60vh] place-items-center px-4">
@@ -467,29 +564,61 @@ export default function ProfilePage() {
               <Label>{t('fields.email') || 'Email'}</Label>
               <Input readOnly value={email ?? ''} className="bg-neutral-100" />
             </div>
-            <div>
+
+            {/* Lokasi: Single Select */}
+            <div className="md:col-span-1">
               <Label>{t('fields.location') || 'Lokasi'}</Label>
-              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={t('ph.location') || 'Kota, Negara'} />
+              <div className="relative">
+                <select
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 pr-10 text-sm text-neutral-900 outline-none transition focus:border-neutral-900"
+                >
+                  <option value="" disabled>
+                    Pilih lokasi…
+                  </option>
+                  {LOCATION_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">▾</span>
+              </div>
             </div>
+
             <div>
               <Label>{t('fields.phone') || 'Nomor HP'}</Label>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('ph.phone') || '08xxxx'} />
             </div>
+
+            {/* Skills: Multi Select + Chips */}
             <div className="md:col-span-2">
-              <Label>{t('fields.skills') || 'Keahlian (pisahkan koma)'}</Label>
-              <Textarea
-                rows={3}
-                value={skills}
-                onChange={(e) => setSkills(e.target.value)}
-                placeholder={t('ph.skills') || 'React, Tailwind, PostgreSQL'}
-              />
-              {!!skills.trim() && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {tags.map((s, i) => (
-                    <Pill key={i}>#{s}</Pill>
+              <Label>{t('fields.skills') || 'Keahlian (Oil & Gas)'}</Label>
+
+              {/* Selected chips */}
+              {skillTags.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {skillTags.map((s, i) => (
+                    <button
+                      type="button"
+                      key={`${s}-${i}`}
+                      onClick={() => setSkillTags((prev) => prev.filter((x) => x !== s))}
+                      className="group inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs text-neutral-800 hover:bg-neutral-50"
+                    >
+                      #{s}
+                      <span className="text-neutral-400 group-hover:text-neutral-700">×</span>
+                    </button>
                   ))}
                 </div>
               )}
+
+              {/* Search + options */}
+              <SkillMultiSelect
+                options={SKILL_OPTIONS}
+                selected={skillTags}
+                onChange={setSkillTags}
+              />
             </div>
           </div>
 
@@ -559,12 +688,12 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                {cvUrl && isPdf && (
+                {cvUrl && cvMeta?.type === 'application/pdf' && (
                   <div className="h-[420px] w-full overflow-hidden rounded-b-xl border-t border-neutral-200">
                     <iframe src={cvUrl} className="h-full w-full" title="CV Preview" />
                   </div>
                 )}
-                {cvUrl && !isPdf && (
+                {cvUrl && cvMeta?.type !== 'application/pdf' && (
                   <p className="px-4 pb-4 text-xs text-neutral-500">
                     {t('hints.docPreview') || 'Preview inline hanya untuk PDF. DOC/DOCX dibuka/diunduh di tab baru.'}
                   </p>
@@ -579,6 +708,61 @@ export default function ProfilePage() {
         <p className="text-center text-xs text-neutral-500">
           Biodata tersimpan di <strong>localStorage</strong>, Foto &amp; CV tersimpan di <strong>IndexedDB</strong>.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/** ======= Skill Multi-Select (tanpa lib) ======= */
+function SkillMultiSelect({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options.filter((o) => !selected.includes(o));
+    return options.filter((o) => !selected.includes(o) && o.toLowerCase().includes(q));
+  }, [options, selected, query]);
+
+  return (
+    <div className="rounded-xl border border-neutral-300">
+      <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-2.5">
+        <svg width="16" height="16" viewBox="0 0 24 24" className="text-neutral-500">
+          <path d="M21 21l-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+        </svg>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Cari skill O&G…"
+          className="w-full bg-transparent text-sm outline-none placeholder-neutral-400"
+        />
+      </div>
+
+      <div className="max-h-52 overflow-auto p-2">
+        {filtered.length === 0 ? (
+          <p className="px-2 py-2 text-xs text-neutral-500">Tidak ada hasil.</p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {filtered.map((opt) => (
+              <li key={opt}>
+                <button
+                  type="button"
+                  onClick={() => onChange([...selected, opt])}
+                  className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50"
+                >
+                  {opt}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

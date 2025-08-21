@@ -1,19 +1,19 @@
-// frontend/src/hooks/useAuth.tsx
 'use client';
 
-import {createContext, useContext, useEffect, useMemo, useState} from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { api } from '@/lib/api';
 
 type Role = 'admin' | 'user';
 
 export type UserLite = {
   id: string;
-  email: string;
+  email?: string;
   name?: string | null;
   photoUrl?: string | null;
   cvUrl?: string | null;
   role?: Role;
+  // optional employer info if you have it
+  employer?: { id: string; slug?: string; displayName?: string | null } | null;
 };
 
 export type SignupCompanyPayload = {
@@ -27,63 +27,36 @@ export type AuthCtx = {
   user: UserLite | null;
   loading: boolean;
 
-  // identifier boleh email (user) atau username (admin)
   signin: (identifier: string, password: string) => Promise<UserLite>;
   signup: (name: string, email: string, password: string) => Promise<UserLite>;
   signout: () => Promise<void>;
 
-  // opsional: untuk halaman signup perusahaan
   signupCompany?: (payload: SignupCompanyPayload) => Promise<void>;
-
-  // opsional: kalau nanti butuh social login
-  social?: (provider: 'google', intent?: 'signin' | 'signup') => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx>(null as any);
-
-async function api(path: string, init?: RequestInit & { json?: any }) {
-  const res = await fetch(`${API}${path}`, {
-    method: init?.method || (init?.json ? 'POST' : 'GET'),
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-    credentials: 'include',
-    body: init?.json ? JSON.stringify(init.json) : undefined,
-  });
-  if (!res.ok) {
-    let msg = 'Request failed';
-    try {
-      const j = await res.json();
-      msg = j?.message || j?.error || msg;
-    } catch {}
-    throw new Error(msg);
-  }
-  if (res.status === 204) return null as any;
-  return res.json();
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserLite | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore session: coba user dulu, kalau gagal coba admin
+  // Restore session
   useEffect(() => {
     (async () => {
       try {
-        const me: UserLite = await api('/auth/me');
-        setUser(me);
+        // coba user biasa
+        const me: any = await api('/auth/me');
+        setUser({ ...me, role: 'user' });
       } catch {
         try {
-          const adm = await api('/admin/me'); // sebaiknya backend sediakan endpoint ini
-          // Normalisasi admin ke bentuk UserLite
-          const mapped: UserLite = {
+          // coba admin
+          const adm: any = await api('/admin/me');
+          setUser({
             id: adm?.id || `admin:${adm?.username || 'unknown'}`,
-            email: adm?.email || `${adm?.username || 'admin'}@local`,
+            email: `${adm?.username || 'admin'}@local`,
             name: adm?.username || 'Admin',
             role: 'admin',
-          };
-          setUser(mapped);
+          });
         } catch {
           setUser(null);
         }
@@ -93,40 +66,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  // Login: kalau identifier ada '@' anggap email → /auth/signin
-  // kalau tidak, anggap username admin → /admin/signin
   const signin: AuthCtx['signin'] = async (identifier, password) => {
+    // Jika ada '@', coba dulu login user
     if (identifier.includes('@')) {
-      const u: UserLite = await api('/auth/signin', { json: { email: identifier, password } });
-      setUser(u);
-      return u;
-    } else {
-      const a = await api('/admin/signin', { json: { username: identifier, password } });
-      const mapped: UserLite = {
-        id: a?.id || `admin:${a?.username || identifier}`,
-        email: a?.email || `${a?.username || identifier}@local`,
-        name: a?.username || 'Admin',
-        role: 'admin',
-      };
-      setUser(mapped);
-      return mapped;
+      try {
+        const u: any = await api('/auth/signin', { json: { email: identifier, password } });
+        const mapped: UserLite = { ...u, role: 'user' };
+        setUser(mapped);
+        return mapped;
+      } catch (e: any) {
+        // kalau gagal (401/403/404), fallback ke admin/signin
+        const a: any = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
+        const mapped: UserLite = {
+          id: a?.admin?.id || `admin:${identifier}`,
+          email: identifier,
+          name: a?.admin?.username || 'Admin',
+          role: 'admin',
+        };
+        setUser(mapped);
+        return mapped;
+      }
     }
+
+    // Tidak ada '@' → anggap username admin
+    const a: any = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
+    const mapped: UserLite = {
+      id: a?.admin?.id || `admin:${identifier}`,
+      email: `${identifier}@local`,
+      name: a?.admin?.username || 'Admin',
+      role: 'admin',
+    };
+    setUser(mapped);
+    return mapped;
   };
 
   const signup: AuthCtx['signup'] = async (name, email, password) => {
-    const u: UserLite = await api('/auth/signup', { json: { name, email, password } });
-    setUser(u);
-    return u;
+    const u: any = await api('/auth/signup', { json: { name, email, password } });
+    const mapped: UserLite = { ...u, role: 'user' };
+    setUser(mapped);
+    return mapped;
   };
 
-  // Opsional: endpoint perusahaan; kalau belum ada, ubah sesuai backend kamu
   const signupCompany: AuthCtx['signupCompany'] = async (payload) => {
     await api('/companies/signup', { json: payload });
-    // biasanya tidak auto-login; biarkan user tetap null atau lakukan fetch /auth/me kalau backend auto-login
   };
 
   const signout = async () => {
-    // coba keduanya; abaikan kalau error
     try { await api('/auth/signout', { method: 'POST' }); } catch {}
     try { await api('/admin/signout', { method: 'POST' }); } catch {}
     setUser(null);
@@ -139,8 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signin,
       signup,
       signout,
-      signupCompany, // opsional, tapi disediakan agar TS tidak error di signup_perusahaan
-      // social: undefined, // siapkan kalau nanti dipakai
+      signupCompany,
     }),
     [user, loading]
   );

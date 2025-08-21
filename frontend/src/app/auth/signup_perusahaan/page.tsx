@@ -1,7 +1,14 @@
 // frontend/src/app/auth/signup_perusahaan/page.tsx
 'use client';
 
-import { useMemo, useRef, useState, type FormEvent, type MouseEvent, useEffect } from 'react';
+import {
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -11,9 +18,11 @@ import Logo from '@/app/Images/Ungu__1_-removebg-preview.png';
 /* --------------------------------- Config --------------------------------- */
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000';
 const MIDTRANS_CLIENT_KEY = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ?? '';
-const MIDTRANS_PAYMENT_LINK_BASE = process.env.NEXT_PUBLIC_MIDTRANS_PAYMENT_LINK_BASE ?? '';
+const MIDTRANS_PAYMENT_LINK_BASE =
+  process.env.NEXT_PUBLIC_MIDTRANS_PAYMENT_LINK_BASE ?? '';
 const FORCE_SNAP = (process.env.NEXT_PUBLIC_FORCE_SNAP ?? 'true') === 'true';
-const MIDTRANS_PRODUCTION = (process.env.NEXT_PUBLIC_MIDTRANS_PRODUCTION ?? 'false') === 'true';
+const MIDTRANS_PRODUCTION =
+  (process.env.NEXT_PUBLIC_MIDTRANS_PRODUCTION ?? 'false') === 'true';
 
 /* --------------------------------- Types --------------------------------- */
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -41,7 +50,12 @@ type CompanyProfile = {
   about?: string;
   address?: string;
   city?: string;
-  socials: Partial<Record<'website' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', string>>;
+  socials: Partial<
+    Record<
+      'website' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube',
+      string
+    >
+  >;
 };
 
 type NewJob = {
@@ -86,7 +100,11 @@ function cx(...s: (string | false | null | undefined)[]) {
   return s.filter(Boolean).join(' ');
 }
 function formatIDR(n: number) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 function normalizeUrl(u?: string) {
   const v = (u ?? '').trim();
@@ -95,12 +113,18 @@ function normalizeUrl(u?: string) {
 }
 function mapSizeToEnum(ui?: string): string | undefined {
   switch ((ui ?? '').trim()) {
-    case '1-10': return 'S1_10';
-    case '11-50': return 'S11_50';
-    case '51-200': return 'S51_200';
-    case '201-500': return 'S201_500';
-    case '500+':   return 'S501_1000';
-    default: return undefined;
+    case '1-10':
+      return 'S1_10';
+    case '11-50':
+      return 'S11_50';
+    case '51-200':
+      return 'S51_200';
+    case '201-500':
+      return 'S201_500';
+    case '500+':
+      return 'S501_1000';
+    default:
+      return undefined;
   }
 }
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
@@ -115,17 +139,24 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     try {
       const j = await res.json();
       msg = j?.error || j?.message || msg;
-    } catch {}
+    } catch {
+      // ignore
+    }
     throw new Error(msg);
   }
   return res.json();
 }
 function getPaymentLink(plan?: Plan | null): string | null {
   if (!plan) return null;
-  if (plan.paymentLinkUrl && /^https?:\/\//i.test(plan.paymentLinkUrl)) return plan.paymentLinkUrl;
+  if (plan.paymentLinkUrl && /^https?:\/\//i.test(plan.paymentLinkUrl))
+    return plan.paymentLinkUrl;
   if (plan.priceId && /^https?:\/\//i.test(plan.priceId)) return plan.priceId;
   if (plan.priceId && MIDTRANS_PAYMENT_LINK_BASE)
-    return MIDTRANS_PAYMENT_LINK_BASE.replace(/\/+$/, '') + '/' + plan.priceId.replace(/^\/+/, '');
+    return (
+      MIDTRANS_PAYMENT_LINK_BASE.replace(/\/+$/, '') +
+      '/' +
+      plan.priceId.replace(/^\/+/, '')
+    );
   return null;
 }
 
@@ -139,7 +170,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [employerId, setEmployerId] = useState<string | null>(null);
 
-  // ⬇️ status pembayaran
+  // status pembayaran
   const [paid, setPaid] = useState(false);
 
   /* ------------------------------ Step 1 form ----------------------------- */
@@ -153,15 +184,25 @@ export default function Page() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [agree, setAgree] = useState(true);
 
-  const strong = pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
+  const strong =
+    pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
 
   async function onCreateCompany(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
 
-    if (!agree) return setError(t('error.agree'));
-    if (pw !== confirm) return setError(t('error.mismatch'));
-    if (company.trim().length < 2) return setError(t('error.company'));
+    if (!agree) {
+      setError(t('error.agree'));
+      return;
+    }
+    if (pw !== confirm) {
+      setError(t('error.mismatch'));
+      return;
+    }
+    if (company.trim().length < 2) {
+      setError(t('error.company'));
+      return;
+    }
 
     try {
       setBusy(true);
@@ -174,7 +215,11 @@ export default function Page() {
         website: normalizeUrl(website),
       };
 
-      const resp = await apiPost<{ ok: true; employerId: string; slug: string }>('/api/employers/step1', {
+      const resp = await apiPost<{
+        ok: true;
+        employerId: string;
+        slug: string;
+      }>('/api/employers/step1', {
         companyName: payload.companyName,
         displayName: payload.companyName,
         email: payload.email,
@@ -205,11 +250,14 @@ export default function Page() {
     city: '',
     socials: {},
   });
+
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   function validateStep2() {
-    if (profile.name.trim().length < 2) return 'Nama perusahaan wajib diisi.';
-    if (!/^\S+@\S+\.\S+$/.test(profile.email)) return 'Email perusahaan tidak valid.';
+    if (profile.name.trim().length < 2)
+      return 'Nama perusahaan wajib diisi.';
+    if (!/^\S+@\S+\.\S+$/.test(profile.email))
+      return 'Email perusahaan tidak valid.';
     return null;
   }
 
@@ -231,7 +279,7 @@ export default function Page() {
     });
   }
 
-  /* ------------------------------ Step 3: Paket (dinamis) ------------------------------ */
+  /* ------------------------------ Step 3: Paket ------------------------------ */
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string>('');
@@ -242,12 +290,16 @@ export default function Page() {
       try {
         setPlansLoading(true);
         setError(null);
-        const res = await fetch(`${API_BASE}/api/payments/plans`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/api/payments/plans`, {
+          credentials: 'include',
+        });
         if (!res.ok) throw new Error('Gagal memuat paket');
         const data = (await res.json()) as Plan[];
-        const active = (data || []).filter(p => p.active);
+        const active = (data || []).filter((p) => p.active);
         setPlans(active);
-        if (!selectedSlug && active.length > 0) setSelectedSlug(active[0].slug);
+        if (!selectedSlug && active.length > 0) {
+          setSelectedSlug(active[0].slug);
+        }
       } catch (e: any) {
         setError(e?.message || 'Gagal memuat paket');
       } finally {
@@ -268,10 +320,15 @@ export default function Page() {
     s.setAttribute('data-client-key', MIDTRANS_CLIENT_KEY);
     s.async = true;
     document.body.appendChild(s);
-    return () => { document.body.removeChild(s); };
+    return () => {
+      document.body.removeChild(s);
+    };
   }, [step]);
 
-  const currentPlan = useMemo(() => plans.find(p => p.slug === selectedSlug), [plans, selectedSlug]);
+  const currentPlan = useMemo(
+    () => plans.find((p) => p.slug === selectedSlug),
+    [plans, selectedSlug]
+  );
 
   async function submitStep3() {
     if (!employerId) throw new Error('EmployerId belum tersedia.');
@@ -279,17 +336,17 @@ export default function Page() {
 
     await apiPost('/api/employers/step3', { employerId, planSlug: selectedSlug });
 
-    const plan = plans.find(p => p.slug === selectedSlug);
+    const plan = plans.find((p) => p.slug === selectedSlug);
     if (!plan) throw new Error('Paket tidak ditemukan.');
 
-    // =====> ABAIKAN PAYMENT LINK (agar tidak pindah web)
+    // Payment Link (opsional)
     const link = !FORCE_SNAP ? getPaymentLink(plan) : null;
     if (link) {
-      window.open(link, '_blank', 'noopener,noreferrer'); // kalau sengaja pakai payment link, tab baru
+      window.open(link, '_blank', 'noopener,noreferrer');
       return;
     }
 
-    // =====> SNAP (modal)
+    // Snap Modal
     const res = await fetch(`${API_BASE}/api/payments/checkout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -305,7 +362,12 @@ export default function Page() {
     });
     if (!res.ok) {
       let msg = 'Gagal memulai pembayaran';
-      try { const j = await res.json(); msg = j?.error || j?.message || msg; } catch {}
+      try {
+        const j = await res.json();
+        msg = j?.error || j?.message || msg;
+      } catch {
+        // ignore
+      }
       throw new Error(msg);
     }
 
@@ -314,14 +376,20 @@ export default function Page() {
     if (window.snap?.pay) {
       await new Promise<void>((resolve, reject) => {
         window.snap!.pay(token, {
-          onSuccess: async () => { setPaid(true); resolve(); },   // ⬅️ tandai sudah bayar
-          onPending: async () => { setPaid(true); resolve(); },   // ⬅️ pending juga lanjut
+          onSuccess: async () => {
+            setPaid(true);
+            resolve();
+          },
+          onPending: async () => {
+            setPaid(true);
+            resolve();
+          },
           onError: (e: any) => reject(e),
           onClose: () => reject(new Error('Pembayaran ditutup sebelum selesai')),
         });
       });
     } else {
-      // Fallback Snap Redirect → tab baru agar wizard tetap ada
+      // Fallback: Snap redirect
       window.open(redirect_url, '_blank', 'noopener,noreferrer');
     }
   }
@@ -339,12 +407,14 @@ export default function Page() {
     requirements: '',
     tags: '',
   });
+
   function validateStep4() {
     if (job.title.trim().length < 3) return 'Posisi pekerjaan wajib diisi.';
     if (job.location.trim().length < 2) return 'Lokasi wajib diisi.';
     if (job.description.trim().length < 10) return 'Deskripsi terlalu singkat.';
     return null;
   }
+
   async function submitStep4() {
     const emsg = validateStep4();
     if (emsg) throw new Error(emsg);
@@ -357,7 +427,9 @@ export default function Page() {
       job.deadline && `Batas Lamar: ${job.deadline}`,
       job.requirements && `\n\nKualifikasi:\n${job.requirements}`,
       job.tags && `\n\nTags: ${job.tags}`,
-    ].filter(Boolean).join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     await apiPost<{ ok: true; jobId: string }>('/api/employers/step4', {
       employerId,
@@ -377,7 +449,6 @@ export default function Page() {
     try {
       if (!employerId) throw new Error('EmployerId belum tersedia.');
       if (step <= 2) await submitStep2();
-      // ⛔️ JANGAN bayar lagi di sini; pastikan sudah bayar
       if (!paid) throw new Error('Selesaikan pembayaran terlebih dahulu.');
       if (step <= 4) await submitStep4();
 
@@ -387,7 +458,6 @@ export default function Page() {
         files: [],
       });
 
-      // ✅ Masuk dashboard SETELAH step 4 & 5 selesai
       router.push('/employer');
     } catch (err: unknown) {
       setError((err as { message?: string })?.message || 'Gagal mengirim.');
@@ -408,51 +478,79 @@ export default function Page() {
 
   /* --------------------------------- Render --------------------------------- */
   return (
-    <div className="min-h-[100svh] bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+    <div className="min-h-[100svh] bg-gradient-to-br from-slate-50 via-white to-slate-100 px-3 py-6 sm:px-4 sm:py-10">
       <div className="mx-auto w-full max-w-5xl">
-        <div className="mx-auto w-full max-w-4xl rounded-[28px] border border-slate-200/70 bg-white p-6 shadow-xl">
+        <div className="mx-auto w-full max-w-4xl rounded-[20px] sm:rounded-[28px] border border-slate-200/70 bg-white p-4 sm:p-6 shadow-xl">
           {/* Header */}
           <div className="mb-6 text-center">
-            <Image src={Logo} alt="ArkWork Logo" width={72} height={72} className="mx-auto mb-4 h-14 w-14 object-contain" priority />
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+            <Image
+              src={Logo}
+              alt="ArkWork Logo"
+              width={72}
+              height={72}
+              className="mx-auto mb-4 h-12 w-12 sm:h-14 sm:w-14 object-contain"
+              priority
+            />
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">
               {step === 1 ? t('title') : 'Create Company Account'}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {step === 1 ? t('subtitle') : 'Kelola lowongan & rekrut talenta terbaik di ArkWork.'}
+              {step === 1
+                ? t('subtitle')
+                : 'Kelola lowongan & rekrut talenta terbaik di ArkWork.'}
             </p>
           </div>
 
           {/* Stepper */}
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-8 flex items-center justify-between gap-2 sm:gap-0">
             {steps.map(({ n, label }) => (
-              <div key={n} className="flex flex-1 items-center">
+              <div key={n} className="flex flex-1 items-center min-w-0">
                 <div
                   className={cx(
-                    'flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold',
-                    n <= step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600',
+                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                    n <= step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
                   )}
                 >
                   {n}
                 </div>
-                <div className={cx('ml-3 text-sm', n <= step ? 'text-slate-900 font-medium' : 'text-slate-500')}>{label}</div>
-                {n !== 5 && <div className="mx-4 h-[2px] flex-1 rounded bg-slate-200" />}
+                <div
+                  className={cx(
+                    'ml-2 sm:ml-3 text-[11px] sm:text-sm truncate',
+                    n <= step ? 'text-slate-900 font-medium' : 'text-slate-500'
+                  )}
+                  title={label}
+                >
+                  {label}
+                </div>
+                {n !== 5 && (
+                  <div className="mx-2 sm:mx-4 h-[2px] flex-1 rounded bg-slate-200" />
+                )}
               </div>
             ))}
           </div>
 
           {/* Error (global) */}
           {error && (
-            <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">
+            <div
+              className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+              role="alert"
+            >
               {error}
             </div>
           )}
 
           {/* ------------------------------- STEP 1 ------------------------------- */}
           {step === 1 && (
-            <form onSubmit={onCreateCompany} noValidate className="grid grid-cols-1 gap-4">
+            <form
+              onSubmit={onCreateCompany}
+              noValidate
+              className="grid grid-cols-1 gap-4"
+            >
               {/* Company */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">{t('form.company')}</span>
+                <span className="mb-1 block text-xs text-slate-600">
+                  {t('form.company')}
+                </span>
                 <input
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
@@ -465,7 +563,9 @@ export default function Page() {
 
               {/* Email */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">{t('form.email')}</span>
+                <span className="mb-1 block text-xs text-slate-600">
+                  {t('form.email')}
+                </span>
                 <input
                   type="email"
                   value={email}
@@ -480,7 +580,9 @@ export default function Page() {
 
               {/* Website */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">{t('form.website')}</span>
+                <span className="mb-1 block text-xs text-slate-600">
+                  {t('form.website')}
+                </span>
                 <input
                   value={website}
                   onChange={(e) => setWebsite(e.target.value)}
@@ -493,7 +595,9 @@ export default function Page() {
 
               {/* Password */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">{t('form.password')}</span>
+                <span className="mb-1 block text-xs text-slate-600">
+                  {t('form.password')}
+                </span>
                 <div className="relative">
                   <input
                     type={showPw ? 'text' : 'password'}
@@ -515,16 +619,33 @@ export default function Page() {
                     {showPw ? '🙈' : '👁️'}
                   </button>
                 </div>
-                <div className="mt-1 flex items-center gap-2" aria-hidden="true">
-                  <div className={`h-1 w-1/3 rounded ${pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'}`} />
-                  <div className={`h-1 w-1/3 rounded ${pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'}`} />
-                  <div className={`h-1 w-1/3 rounded ${strong ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                <div
+                  className="mt-1 flex items-center gap-2"
+                  aria-hidden="true"
+                >
+                  <div
+                    className={`h-1 w-1/3 rounded ${
+                      pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'
+                    }`}
+                  />
+                  <div
+                    className={`h-1 w-1/3 rounded ${
+                      pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'
+                    }`}
+                  />
+                  <div
+                    className={`h-1 w-1/3 rounded ${
+                      strong ? 'bg-emerald-500' : 'bg-slate-200'
+                    }`}
+                  />
                 </div>
               </label>
 
               {/* Confirm */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">{t('form.confirm')}</span>
+                <span className="mb-1 block text-xs text-slate-600">
+                  {t('form.confirm')}
+                </span>
                 <div className="relative">
                   <input
                     type={showConfirm ? 'text' : 'password'}
@@ -546,7 +667,13 @@ export default function Page() {
                   </button>
                 </div>
                 {confirm.length > 0 && (
-                  <p className={`mt-1 text-xs ${pw === confirm ? 'text-emerald-600' : 'text-rose-600'}`} role="status" aria-live="polite">
+                  <p
+                    className={`mt-1 text-xs ${
+                      pw === confirm ? 'text-emerald-600' : 'text-rose-600'
+                    }`}
+                    role="status"
+                    aria-live="polite"
+                  >
                     {pw === confirm ? t('match.ok') : t('match.no')}
                   </p>
                 )}
@@ -562,9 +689,17 @@ export default function Page() {
                 />
                 <span>
                   I agree to the{' '}
-                  <Link href="/terms" className="text-blue-700 hover:underline">Terms of Service</Link>{' '}
+                  <Link href="/terms" className="text-blue-700 hover:underline">
+                    Terms of Service
+                  </Link>{' '}
                   and{' '}
-                  <Link href="/privacy" className="text-blue-700 hover:underline">Privacy Policy</Link>.
+                  <Link
+                    href="/privacy"
+                    className="text-blue-700 hover:underline"
+                  >
+                    Privacy Policy
+                  </Link>
+                  .
                 </span>
               </label>
 
@@ -573,7 +708,14 @@ export default function Page() {
                 disabled={busy}
                 className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
               >
-                {busy ? (<><span className="mr-2 inline-block animate-spin">⏳</span>{t('creating')}</>) : (t('createBtn'))}
+                {busy ? (
+                  <>
+                    <span className="mr-2 inline-block animate-spin">⏳</span>
+                    {t('creating')}
+                  </>
+                ) : (
+                  t('createBtn')
+                )}
               </button>
             </form>
           )}
@@ -585,9 +727,15 @@ export default function Page() {
                 <div className="h-16 w-16 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
                   {profile.logo ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={profile.logo} alt="Logo preview" className="h-full w-full object-cover" />
+                    <img
+                      src={profile.logo}
+                      alt="Logo preview"
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-slate-400 text-xs">No logo</div>
+                    <div className="flex h-full w-full items-center justify-center text-slate-400 text-xs">
+                      No logo
+                    </div>
                   )}
                 </div>
                 <div>
@@ -600,7 +748,11 @@ export default function Page() {
                       const f = e.target.files?.[0];
                       if (!f) return;
                       const reader = new FileReader();
-                      reader.onload = (ev) => setProfile((p) => ({ ...p, logo: String(ev.target?.result || '') }));
+                      reader.onload = (ev) =>
+                        setProfile((p) => ({
+                          ...p,
+                          logo: String(ev.target?.result || ''),
+                        }));
                       reader.readAsDataURL(f);
                     }}
                   />
@@ -616,20 +768,28 @@ export default function Page() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Nama Perusahaan</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Nama Perusahaan
+                  </span>
                   <input
                     value={profile.name}
-                    onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, name: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     placeholder="e.g. ArkWork Indonesia, Inc."
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Email Perusahaan</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Email Perusahaan
+                  </span>
                   <input
                     type="email"
                     value={profile.email}
-                    onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, email: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     placeholder="hr@company.com"
                   />
@@ -638,10 +798,14 @@ export default function Page() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Industri</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Industri
+                  </span>
                   <select
                     value={profile.industry}
-                    onChange={(e) => setProfile((p) => ({ ...p, industry: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, industry: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="">Pilih industri</option>
@@ -653,10 +817,14 @@ export default function Page() {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Ukuran</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Ukuran
+                  </span>
                   <select
                     value={profile.size}
-                    onChange={(e) => setProfile((p) => ({ ...p, size: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, size: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="">Pilih ukuran</option>
@@ -670,10 +838,14 @@ export default function Page() {
               </div>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Tentang perusahaan</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Tentang perusahaan
+                </span>
                 <textarea
                   value={profile.about}
-                  onChange={(e) => setProfile((p) => ({ ...p, about: e.target.value }))}
+                  onChange={(e) =>
+                    setProfile((p) => ({ ...p, about: e.target.value }))
+                  }
                   rows={4}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Visi, misi, budaya kerja, dsb."
@@ -682,10 +854,14 @@ export default function Page() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Alamat kantor</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Alamat kantor
+                  </span>
                   <textarea
                     value={profile.address}
-                    onChange={(e) => setProfile((p) => ({ ...p, address: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, address: e.target.value }))
+                    }
                     rows={3}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     placeholder="Jalan, nomor, dll."
@@ -693,19 +869,27 @@ export default function Page() {
                 </label>
                 <div className="grid gap-4">
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Kota / Kabupaten</span>
+                    <span className="mb-1 block text-sm text-slate-600">
+                      Kota / Kabupaten
+                    </span>
                     <input
                       value={profile.city}
-                      onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
+                      onChange={(e) =>
+                        setProfile((p) => ({ ...p, city: e.target.value }))
+                      }
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Jakarta Selatan"
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Website (opsional)</span>
+                    <span className="mb-1 block text-sm text-slate-600">
+                      Website (opsional)
+                    </span>
                     <input
                       value={profile.website}
-                      onChange={(e) => setProfile((p) => ({ ...p, website: e.target.value }))}
+                      onChange={(e) =>
+                        setProfile((p) => ({ ...p, website: e.target.value }))
+                      }
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="company.com"
                     />
@@ -714,13 +898,29 @@ export default function Page() {
               </div>
 
               <div>
-                <span className="mb-2 block text-sm font-medium text-slate-700">Website & Sosial</span>
+                <span className="mb-2 block text-sm font-medium text-slate-700">
+                  Website & Sosial
+                </span>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {(['website', 'linkedin', 'instagram', 'facebook', 'tiktok', 'youtube'] as const).map((key) => (
+                  {(
+                    [
+                      'website',
+                      'linkedin',
+                      'instagram',
+                      'facebook',
+                      'tiktok',
+                      'youtube',
+                    ] as const
+                  ).map((key) => (
                     <input
                       key={key}
                       value={profile.socials[key] || ''}
-                      onChange={(e) => setProfile((p) => ({ ...p, socials: { ...p.socials, [key]: e.target.value } }))}
+                      onChange={(e) =>
+                        setProfile((p) => ({
+                          ...p,
+                          socials: { ...p.socials, [key]: e.target.value },
+                        }))
+                      }
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder={key[0].toUpperCase() + key.slice(1)}
                     />
@@ -728,7 +928,14 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setStep(1)}
+                  className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
+                >
+                  Kembali
+                </button>
                 <button
                   type="button"
                   onClick={async () => {
@@ -756,7 +963,9 @@ export default function Page() {
           {step === 3 && (
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Pilih Paket</h2>
-              <p className="mt-1 text-sm text-slate-600">Paket di bawah berasal dari konfigurasi admin (Monetisasi).</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Paket di bawah berasal dari konfigurasi admin (Monetisasi).
+              </p>
 
               {plansLoading ? (
                 <div className="mt-6 text-slate-500">Memuat paket…</div>
@@ -771,24 +980,46 @@ export default function Page() {
                         onClick={() => setSelectedSlug(p.slug)}
                         className={cx(
                           'text-left rounded-2xl border p-5 transition focus:outline-none',
-                          active ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300',
+                          active
+                            ? 'border-blue-500 ring-2 ring-blue-100'
+                            : 'border-slate-200 hover:border-slate-300'
                         )}
                       >
-                        <div className="flex items-baseline justify-between">
-                          <h3 className={cx('text-lg font-semibold', active ? 'text-blue-700' : 'text-slate-900')}>{p.name}</h3>
-                          <div className={cx('text-sm', active ? 'text-blue-600' : 'text-slate-500')}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <h3
+                            className={cx(
+                              'text-base sm:text-lg font-semibold',
+                              active ? 'text-blue-700' : 'text-slate-900'
+                            )}
+                          >
+                            {p.name}
+                          </h3>
+                          <div
+                            className={cx(
+                              'text-sm',
+                              active ? 'text-blue-600' : 'text-slate-500'
+                            )}
+                          >
                             {formatIDR(p.amount)}
                           </div>
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">/{p.interval}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          /{p.interval}
+                        </div>
                         <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                          {(p.description || '').split('\n').filter(Boolean).slice(0, 4).map((line, i) => (
-                            <li key={i} className="flex items-start gap-2">
-                              <span className="mt-[2px] h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              {line}
-                            </li>
-                          ))}
-                          {!p.description && <li className="text-slate-500/80">—</li>}
+                          {(p.description || '')
+                            .split('\n')
+                            .filter(Boolean)
+                            .slice(0, 4)
+                            .map((line, i) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                <span>{line}</span>
+                              </li>
+                            ))}
+                          {!p.description && (
+                            <li className="text-slate-500/80">—</li>
+                          )}
                         </ul>
                       </button>
                     );
@@ -799,7 +1030,9 @@ export default function Page() {
               <div className="mt-6 rounded-2xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600">Paket dipilih</span>
-                  <span className="font-semibold text-slate-900">{currentPlan?.name ?? '-'}</span>
+                  <span className="font-semibold text-slate-900">
+                    {currentPlan?.name ?? '-'}
+                  </span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <span className="text-slate-600">Subtotal</span>
@@ -809,7 +1042,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-between">
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setStep(2)}
@@ -843,12 +1076,17 @@ export default function Page() {
           {/* ------------------------------- STEP 4 ------------------------------- */}
           {step === 4 && (
             <div className="grid gap-5">
-              <div className="flex items-start justify-between">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-semibold text-slate-900">Pasang Lowongan</h2>
-                  <p className="mt-1 text-sm text-slate-600">Jelaskan posisi, bidang, dan kualifikasi agar kandidat tepat.</p>
+                  <h2 className="text-xl font-semibold text-slate-900">
+                    Pasang Lowongan
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Jelaskan posisi, bidang, dan kualifikasi agar kandidat
+                    tepat.
+                  </p>
                 </div>
-                <div className="hidden rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 md:block">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                   <div className="font-semibold">Tips</div>
                   <ul className="mt-1 list-disc pl-4">
                     <li>Gunakan judul spesifik</li>
@@ -859,20 +1097,28 @@ export default function Page() {
               </div>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Posisi Pekerjaan</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Posisi Pekerjaan
+                </span>
                 <input
                   value={job.title}
-                  onChange={(e) => setJob((j) => ({ ...j, title: e.target.value }))}
+                  onChange={(e) =>
+                    setJob((j) => ({ ...j, title: e.target.value }))
+                  }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Masukan posisi pekerjaan"
                 />
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Bidang Pekerjaan</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Bidang Pekerjaan
+                </span>
                 <select
                   value={job.functionArea}
-                  onChange={(e) => setJob((j) => ({ ...j, functionArea: e.target.value }))}
+                  onChange={(e) =>
+                    setJob((j) => ({ ...j, functionArea: e.target.value }))
+                  }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="">Pilih bidang pekerjaan</option>
@@ -887,10 +1133,14 @@ export default function Page() {
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Level</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Level
+                  </span>
                   <select
                     value={job.level}
-                    onChange={(e) => setJob((j) => ({ ...j, level: e.target.value }))}
+                    onChange={(e) =>
+                      setJob((j) => ({ ...j, level: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="">Pilih level</option>
@@ -903,10 +1153,17 @@ export default function Page() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Tipe Kerja</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Tipe Kerja
+                  </span>
                   <select
                     value={job.type}
-                    onChange={(e) => setJob((j) => ({ ...j, type: e.target.value as NewJob['type'] }))}
+                    onChange={(e) =>
+                      setJob((j) => ({
+                        ...j,
+                        type: e.target.value as NewJob['type'],
+                      }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="full_time">Full-time</option>
@@ -917,10 +1174,17 @@ export default function Page() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-1 block text sm text-slate-600">Mode Kerja</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Mode Kerja
+                  </span>
                   <select
                     value={job.workMode}
-                    onChange={(e) => setJob((j) => ({ ...j, workMode: e.target.value as NewJob['workMode'] }))}
+                    onChange={(e) =>
+                      setJob((j) => ({
+                        ...j,
+                        workMode: e.target.value as NewJob['workMode'],
+                      }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="onsite">On-site</option>
@@ -932,30 +1196,42 @@ export default function Page() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Lokasi</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Lokasi
+                  </span>
                   <input
                     value={job.location}
-                    onChange={(e) => setJob((j) => ({ ...j, location: e.target.value }))}
+                    onChange={(e) =>
+                      setJob((j) => ({ ...j, location: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     placeholder="Jakarta / Surabaya / Remote"
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">Batas Lamar (opsional)</span>
+                  <span className="mb-1 block text-sm text-slate-600">
+                    Batas Lamar (opsional)
+                  </span>
                   <input
                     type="date"
                     value={job.deadline}
-                    onChange={(e) => setJob((j) => ({ ...j, deadline: e.target.value }))}
+                    onChange={(e) =>
+                      setJob((j) => ({ ...j, deadline: e.target.value }))
+                    }
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
               </div>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Deskripsi</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Deskripsi
+                </span>
                 <textarea
                   value={job.description}
-                  onChange={(e) => setJob((j) => ({ ...j, description: e.target.value }))}
+                  onChange={(e) =>
+                    setJob((j) => ({ ...j, description: e.target.value }))
+                  }
                   rows={5}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Gambarkan tanggung jawab, budaya tim, benefit, dll."
@@ -963,10 +1239,14 @@ export default function Page() {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Kualifikasi</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Kualifikasi
+                </span>
                 <textarea
                   value={job.requirements}
-                  onChange={(e) => setJob((j) => ({ ...j, requirements: e.target.value }))}
+                  onChange={(e) =>
+                    setJob((j) => ({ ...j, requirements: e.target.value }))
+                  }
                   rows={4}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Contoh: 3+ tahun pengalaman React, terbiasa Next.js, dsb."
@@ -974,16 +1254,20 @@ export default function Page() {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">Tags (pisahkan koma)</span>
+                <span className="mb-1 block text-sm text-slate-600">
+                  Tags (pisahkan koma)
+                </span>
                 <input
                   value={job.tags}
-                  onChange={(e) => setJob((j) => ({ ...j, tags: e.target.value }))}
+                  onChange={(e) =>
+                    setJob((j) => ({ ...j, tags: e.target.value }))
+                  }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   placeholder="react, nextjs, tailwind"
                 />
               </label>
 
-              <div className="mt-2 flex justify-between">
+              <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setStep(3)}
@@ -1017,63 +1301,93 @@ export default function Page() {
           {/* ------------------------------- STEP 5 ------------------------------- */}
           {step === 5 && (
             <div className="grid gap-6">
-              <h2 className="text-xl font-semibold text-slate-900">Verifikasi & Ringkasan</h2>
+              <h2 className="text-xl font-semibold text-slate-900">
+                Verifikasi & Ringkasan
+              </h2>
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">Profil Perusahaan</div>
+                  <div className="mb-3 text-sm font-semibold text-slate-900">
+                    Profil Perusahaan
+                  </div>
                   <dl className="space-y-2 text-sm">
-                    <Row label="Nama">{profile.name}</Row>
-                    <Row label="Email">{profile.email}</Row>
+                    <Row label="Nama">{profile.name || '-'}</Row>
+                    <Row label="Email">{profile.email || '-'}</Row>
                     <Row label="Industri">{profile.industry || '-'}</Row>
                     <Row label="Ukuran">{profile.size || '-'}</Row>
                     <Row label="Kota">{profile.city || '-'}</Row>
-                    <Row label="Website">{profile.website ? normalizeUrl(profile.website) : '-'}</Row>
+                    <Row label="Website">
+                      {profile.website ? normalizeUrl(profile.website) : '-'}
+                    </Row>
                   </dl>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">Paket</div>
+                  <div className="mb-3 text-sm font-semibold text-slate-900">
+                    Paket
+                  </div>
                   <dl className="space-y-2 text-sm">
                     <Row label="Nama Paket">{currentPlan?.name ?? '-'}</Row>
-                    <Row label="Harga">{currentPlan ? formatIDR(currentPlan.amount) : '-'}</Row>
+                    <Row label="Harga">
+                      {currentPlan ? formatIDR(currentPlan.amount) : '-'}
+                    </Row>
                     <Row label="Interval">{currentPlan?.interval ?? '-'}</Row>
                   </dl>
                 </div>
 
                 {/* Status Pembayaran */}
                 <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">Status Pembayaran</div>
+                  <div className="mb-3 text-sm font-semibold text-slate-900">
+                    Status Pembayaran
+                  </div>
                   <dl className="space-y-2 text-sm">
-                    <Row label="Status">{paid ? 'Lunas / Pending (diterima)' : 'Belum dibayar'}</Row>
+                    <Row label="Status">
+                      {paid
+                        ? 'Lunas / Pending (diterima)'
+                        : 'Belum dibayar'}
+                    </Row>
                   </dl>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">Lowongan</div>
+                  <div className="mb-3 text-sm font-semibold text-slate-900">
+                    Lowongan
+                  </div>
                   <dl className="grid gap-4 text-sm md:grid-cols-2">
-                    <Row label="Posisi">{job.title}</Row>
+                    <Row label="Posisi">{job.title || '-'}</Row>
                     <Row label="Bidang">{job.functionArea || '-'}</Row>
                     <Row label="Level">{job.level || '-'}</Row>
                     <Row label="Tipe">{job.type.replace('_', ' ')}</Row>
-                    <Row label="Mode Kerja">{job.workMode}</Row>
-                    <Row label="Lokasi">{job.location}</Row>
+                    <Row label="Mode Kerja">{job.workMode || '-'}</Row>
+                    <Row label="Lokasi">{job.location || '-'}</Row>
                     <Row label="Batas Lamar">{job.deadline || '-'}</Row>
                     <Row label="Tags">{job.tags || '-'}</Row>
                   </dl>
                   <div className="mt-3">
-                    <div className="mb-1 text-xs font-medium text-slate-500">Deskripsi</div>
-                    <p className="whitespace-pre-wrap text-sm text-slate-700">{job.description}</p>
+                    <div className="mb-1 text-xs font-medium text-slate-500">
+                      Deskripsi
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-700">
+                      {job.description || '-'}
+                    </p>
                   </div>
                   <div className="mt-3">
-                    <div className="mb-1 text-xs font-medium text-slate-500">Kualifikasi</div>
-                    <p className="whitespace-pre-wrap text-sm text-slate-700">{job.requirements}</p>
+                    <div className="mb-1 text-xs font-medium text-slate-500">
+                      Kualifikasi
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-700">
+                      {job.requirements || '-'}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+              {error && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {error}
+                </div>
+              )}
 
-              <div className="flex justify-between">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setStep(4)}
@@ -1086,7 +1400,9 @@ export default function Page() {
                   disabled={busy || !paid}
                   onClick={onFinish}
                   className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  title={!paid ? 'Selesaikan pembayaran terlebih dahulu' : undefined}
+                  title={
+                    !paid ? 'Selesaikan pembayaran terlebih dahulu' : undefined
+                  }
                 >
                   {busy ? 'Mengirim…' : 'Kirim'}
                 </button>

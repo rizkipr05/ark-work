@@ -1,4 +1,3 @@
-// frontend/src/app/auth/signup_perusahaan/page.tsx
 'use client';
 
 import {
@@ -25,6 +24,7 @@ const MIDTRANS_PRODUCTION =
   (process.env.NEXT_PUBLIC_MIDTRANS_PRODUCTION ?? 'false') === 'true';
 
 /* --------------------------------- Types --------------------------------- */
+type Mode = 'signin' | 'signup';
 type Step = 1 | 2 | 3 | 4 | 5;
 
 type Plan = {
@@ -165,9 +165,42 @@ export default function Page() {
   const t = useTranslations('companySignup');
   const router = useRouter();
 
+  const [mode, setMode] = useState<Mode>('signin'); // <-- tambah tab login
+  const [error, setError] = useState<string | null>(null);
+
+  /* ------------- SIGNIN (perusahaan) ------------- */
+  const [siEmail, setSiEmail] = useState('');
+  const [siPw, setSiPw] = useState('');
+  const [siShowPw, setSiShowPw] = useState(false);
+  const [siBusy, setSiBusy] = useState(false);
+
+  async function onSignin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (siBusy) return;
+    try {
+      setSiBusy(true);
+      setError(null);
+
+      // /auth/signin milik backend employer-admin
+      await apiPost('/auth/signin', {
+        email: siEmail.trim(),
+        password: siPw,
+        // employerSlug opsional, kirim kalau kamu butuh memilih perusahaan spesifik
+        // employerSlug: 'blue-genc'
+      });
+
+      router.push('/employer');
+      router.refresh();
+    } catch (err: any) {
+      setError(err?.message || 'Email atau password salah');
+    } finally {
+      setSiBusy(false);
+    }
+  }
+
+  /* ------------- SIGNUP (wizard 5 step – kode kamu) ------------- */
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [employerId, setEmployerId] = useState<string | null>(null);
 
   // status pembayaran
@@ -231,6 +264,7 @@ export default function Page() {
 
       setEmployerId(resp.employerId);
       setStep(2);
+      setMode('signup'); // tetap di mode signup
     } catch (err: unknown) {
       setError((err as { message?: string })?.message ?? t('error.default'));
     } finally {
@@ -285,7 +319,7 @@ export default function Page() {
   const [selectedSlug, setSelectedSlug] = useState<string>('');
 
   useEffect(() => {
-    if (step !== 3) return;
+    if (mode !== 'signup' || step !== 3) return;
     (async () => {
       try {
         setPlansLoading(true);
@@ -307,10 +341,10 @@ export default function Page() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [mode, step]);
 
   useEffect(() => {
-    if (step !== 3) return;
+    if (mode !== 'signup' || step !== 3) return;
     if (typeof window === 'undefined') return;
     if (window.snap || !MIDTRANS_CLIENT_KEY) return;
     const s = document.createElement('script');
@@ -323,7 +357,7 @@ export default function Page() {
     return () => {
       document.body.removeChild(s);
     };
-  }, [step]);
+  }, [mode, step]);
 
   const currentPlan = useMemo(
     () => plans.find((p) => p.slug === selectedSlug),
@@ -492,41 +526,37 @@ export default function Page() {
               priority
             />
             <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">
-              {step === 1 ? t('title') : 'Create Company Account'}
+              {mode === 'signin' ? 'Masuk Perusahaan' : step === 1 ? t('title') : 'Create Company Account'}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {step === 1
-                ? t('subtitle')
-                : 'Kelola lowongan & rekrut talenta terbaik di ArkWork.'}
+              {mode === 'signin'
+                ? 'Masuk untuk mengelola lowongan & kandidat.'
+                : step === 1
+                  ? t('subtitle')
+                  : 'Kelola lowongan & rekrut talenta terbaik di ArkWork.'}
             </p>
-          </div>
 
-          {/* Stepper */}
-          <div className="mb-8 flex items-center justify-between gap-2 sm:gap-0">
-            {steps.map(({ n, label }) => (
-              <div key={n} className="flex flex-1 items-center min-w-0">
-                <div
-                  className={cx(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-                    n <= step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
-                  )}
-                >
-                  {n}
-                </div>
-                <div
-                  className={cx(
-                    'ml-2 sm:ml-3 text-[11px] sm:text-sm truncate',
-                    n <= step ? 'text-slate-900 font-medium' : 'text-slate-500'
-                  )}
-                  title={label}
-                >
-                  {label}
-                </div>
-                {n !== 5 && (
-                  <div className="mx-2 sm:mx-4 h-[2px] flex-1 rounded bg-slate-200" />
+            {/* Tabs */}
+            <div className="mt-5 inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 text-sm">
+              <button
+                onClick={() => { setMode('signin'); setError(null); }}
+                className={cx(
+                  'px-4 py-1.5 rounded-xl transition',
+                  mode === 'signin' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'
                 )}
-              </div>
-            ))}
+              >
+                Masuk
+              </button>
+              <button
+                onClick={() => { setMode('signup'); setError(null); }}
+                className={cx(
+                  'px-4 py-1.5 rounded-xl transition',
+                  mode === 'signup' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'
+                )}
+              >
+                Buat Akun Perusahaan
+              </button>
+            </div>
           </div>
 
           {/* Error (global) */}
@@ -539,875 +569,961 @@ export default function Page() {
             </div>
           )}
 
-          {/* ------------------------------- STEP 1 ------------------------------- */}
-          {step === 1 && (
-            <form
-              onSubmit={onCreateCompany}
-              noValidate
-              className="grid grid-cols-1 gap-4"
-            >
-              {/* Company */}
+          {/* ============================ SIGNIN ============================ */}
+          {mode === 'signin' && (
+            <form onSubmit={onSignin} noValidate className="mx-auto grid max-w-md gap-4">
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">
-                  {t('form.company')}
-                </span>
-                <input
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  required
-                  placeholder={t('placeholder.company')}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                  autoComplete="organization"
-                />
-              </label>
-
-              {/* Email */}
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">
-                  {t('form.email')}
-                </span>
+                <span className="mb-1 block text-xs text-slate-600">Email Perusahaan</span>
                 <input
                   type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={siEmail}
+                  onChange={(e) => setSiEmail(e.target.value)}
                   required
                   autoComplete="email"
-                  placeholder={t('placeholder.email')}
+                  placeholder="hr@company.com"
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                  inputMode="email"
                 />
               </label>
 
-              {/* Website */}
               <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">
-                  {t('form.website')}
-                </span>
-                <input
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder={t('placeholder.website')}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                  inputMode="url"
-                  autoComplete="url"
-                />
-              </label>
-
-              {/* Password */}
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">
-                  {t('form.password')}
-                </span>
+                <span className="mb-1 block text-xs text-slate-600">Kata sandi</span>
                 <div className="relative">
                   <input
-                    type={showPw ? 'text' : 'password'}
-                    value={pw}
-                    onChange={(e) => setPw(e.target.value)}
+                    type={siShowPw ? 'text' : 'password'}
+                    value={siPw}
+                    onChange={(e) => setSiPw(e.target.value)}
                     required
-                    minLength={8}
-                    placeholder={t('placeholder.password')}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm"
-                    autoComplete="new-password"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowPw((v) => !v)}
+                    onClick={() => setSiShowPw((v) => !v)}
                     className="absolute inset-y-0 right-0 grid w-10 place-items-center text-slate-500 hover:text-slate-700"
                     tabIndex={-1}
-                    aria-label={t('form.togglePw')}
+                    aria-label="Tampilkan/Sembunyikan password"
                   >
-                    {showPw ? '🙈' : '👁️'}
+                    {siShowPw ? '🙈' : '👁️'}
                   </button>
                 </div>
-                <div
-                  className="mt-1 flex items-center gap-2"
-                  aria-hidden="true"
-                >
-                  <div
-                    className={`h-1 w-1/3 rounded ${
-                      pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'
-                    }`}
-                  />
-                  <div
-                    className={`h-1 w-1/3 rounded ${
-                      pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'
-                    }`}
-                  />
-                  <div
-                    className={`h-1 w-1/3 rounded ${
-                      strong ? 'bg-emerald-500' : 'bg-slate-200'
-                    }`}
-                  />
-                </div>
-              </label>
-
-              {/* Confirm */}
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">
-                  {t('form.confirm')}
-                </span>
-                <div className="relative">
-                  <input
-                    type={showConfirm ? 'text' : 'password'}
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    required
-                    placeholder={t('placeholder.confirm')}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm"
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirm((v) => !v)}
-                    className="absolute inset-y-0 right-0 grid w-10 place-items-center text-slate-500 hover:text-slate-700"
-                    tabIndex={-1}
-                    aria-label={t('form.toggleConfirm')}
-                  >
-                    {showConfirm ? '🙈' : '👁️'}
-                  </button>
-                </div>
-                {confirm.length > 0 && (
-                  <p
-                    className={`mt-1 text-xs ${
-                      pw === confirm ? 'text-emerald-600' : 'text-rose-600'
-                    }`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {pw === confirm ? t('match.ok') : t('match.no')}
-                  </p>
-                )}
-              </label>
-
-              {/* Agree */}
-              <label className="mt-1 inline-flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={agree}
-                  onChange={(e) => setAgree(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                />
-                <span>
-                  I agree to the{' '}
-                  <Link href="/terms" className="text-blue-700 hover:underline">
-                    Terms of Service
-                  </Link>{' '}
-                  and{' '}
-                  <Link
-                    href="/privacy"
-                    className="text-blue-700 hover:underline"
-                  >
-                    Privacy Policy
-                  </Link>
-                  .
-                </span>
               </label>
 
               <button
                 type="submit"
-                disabled={busy}
+                disabled={siBusy}
                 className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
               >
-                {busy ? (
-                  <>
-                    <span className="mr-2 inline-block animate-spin">⏳</span>
-                    {t('creating')}
-                  </>
-                ) : (
-                  t('createBtn')
-                )}
+                {siBusy ? (<><span className="mr-2 inline-block animate-spin">⏳</span>Masuk…</>) : 'Masuk'}
               </button>
+
+              <p className="mt-2 text-center text-sm text-slate-600">
+                Belum punya akun?{' '}
+                <button
+                  type="button"
+                  onClick={() => setMode('signup')}
+                  className="font-medium text-blue-700 hover:underline"
+                >
+                  Daftar perusahaan
+                </button>
+              </p>
             </form>
           )}
 
-          {/* ------------------------------- STEP 2 ------------------------------- */}
-          {step === 2 && (
-            <div className="space-y-6">
-              <div className="flex items-center gap-4">
-                <div className="h-16 w-16 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                  {profile.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={profile.logo}
-                      alt="Logo preview"
-                      className="h-full w-full object-cover"
+          {/* ============================ SIGNUP (wizard) ============================ */}
+          {mode === 'signup' && (
+            <>
+              {/* Stepper */}
+              <div className="mb-8 mt-2 flex items-center justify-between gap-2 sm:gap-0">
+                {steps.map(({ n, label }) => (
+                  <div key={n} className="flex flex-1 items-center min-w-0">
+                    <div
+                      className={cx(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                        n <= step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                      )}
+                    >
+                      {n}
+                    </div>
+                    <div
+                      className={cx(
+                        'ml-2 sm:ml-3 text-[11px] sm:text-sm truncate',
+                        n <= step ? 'text-slate-900 font-medium' : 'text-slate-500'
+                      )}
+                      title={label}
+                    >
+                      {label}
+                    </div>
+                    {n !== 5 && (
+                      <div className="mx-2 sm:mx-4 h-[2px] flex-1 rounded bg-slate-200" />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* ------------------------------- STEP 1 ------------------------------- */}
+              {step === 1 && (
+                <form
+                  onSubmit={onCreateCompany}
+                  noValidate
+                  className="grid grid-cols-1 gap-4"
+                >
+                  {/* Company */}
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-slate-600">
+                      {t('form.company')}
+                    </span>
+                    <input
+                      value={company}
+                      onChange={(e) => setCompany(e.target.value)}
+                      required
+                      placeholder={t('placeholder.company')}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                      autoComplete="organization"
                     />
+                  </label>
+
+                  {/* Email */}
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-slate-600">
+                      {t('form.email')}
+                    </span>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      autoComplete="email"
+                      placeholder={t('placeholder.email')}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                      inputMode="email"
+                    />
+                  </label>
+
+                  {/* Website */}
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-slate-600">
+                      {t('form.website')}
+                    </span>
+                    <input
+                      value={website}
+                      onChange={(e) => setWebsite(e.target.value)}
+                      placeholder={t('placeholder.website')}
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                      inputMode="url"
+                      autoComplete="url"
+                    />
+                  </label>
+
+                  {/* Password */}
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-slate-600">
+                      {t('form.password')}
+                    </span>
+                    <div className="relative">
+                      <input
+                        type={showPw ? 'text' : 'password'}
+                        value={pw}
+                        onChange={(e) => setPw(e.target.value)}
+                        required
+                        minLength={8}
+                        placeholder={t('placeholder.password')}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((v) => !v)}
+                        className="absolute inset-y-0 right-0 grid w-10 place-items-center text-slate-500 hover:text-slate-700"
+                        tabIndex={-1}
+                        aria-label={t('form.togglePw')}
+                      >
+                        {showPw ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                    <div
+                      className="mt-1 flex items-center gap-2"
+                      aria-hidden="true"
+                    >
+                      <div
+                        className={`h-1 w-1/3 rounded ${
+                          pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'
+                        }`}
+                      />
+                      <div
+                        className={`h-1 w-1/3 rounded ${
+                          pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'
+                        }`}
+                      />
+                      <div
+                        className={`h-1 w-1/3 rounded ${
+                          strong ? 'bg-emerald-500' : 'bg-slate-200'
+                        }`}
+                      />
+                    </div>
+                  </label>
+
+                  {/* Confirm */}
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-slate-600">
+                      {t('form.confirm')}
+                    </span>
+                    <div className="relative">
+                      <input
+                        type={showConfirm ? 'text' : 'password'}
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        required
+                        placeholder={t('placeholder.confirm')}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirm((v) => !v)}
+                        className="absolute inset-y-0 right-0 grid w-10 place-items-center text-slate-500 hover:text-slate-700"
+                        tabIndex={-1}
+                        aria-label={t('form.toggleConfirm')}
+                      >
+                        {showConfirm ? '🙈' : '👁️'}
+                      </button>
+                    </div>
+                    {confirm.length > 0 && (
+                      <p
+                        className={`mt-1 text-xs ${
+                          pw === confirm ? 'text-emerald-600' : 'text-rose-600'
+                        }`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {pw === confirm ? t('match.ok') : t('match.no')}
+                      </p>
+                    )}
+                  </label>
+
+                  {/* Agree */}
+                  <label className="mt-1 inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={agree}
+                      onChange={(e) => setAgree(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <span>
+                      I agree to the{' '}
+                      <Link href="/terms" className="text-blue-700 hover:underline">
+                        Terms of Service
+                      </Link>{' '}
+                      and{' '}
+                      <Link
+                        href="/privacy"
+                        className="text-blue-700 hover:underline"
+                      >
+                        Privacy Policy
+                      </Link>
+                      .
+                    </span>
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {busy ? (
+                      <>
+                        <span className="mr-2 inline-block animate-spin">⏳</span>
+                        {t('creating')}
+                      </>
+                    ) : (
+                      t('createBtn')
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {/* ------------------------------- STEP 2 ------------------------------- */}
+              {step === 2 && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-4">
+                    <div className="h-16 w-16 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                      {profile.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={profile.logo}
+                          alt="Logo preview"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-slate-400 text-xs">
+                          No logo
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) =>
+                            setProfile((p) => ({
+                              ...p,
+                              logo: String(ev.target?.result || ''),
+                            }));
+                          reader.readAsDataURL(f);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileRef.current?.click()}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                      >
+                        Unggah Logo
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Nama Perusahaan
+                      </span>
+                      <input
+                        value={profile.name}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, name: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="e.g. ArkWork Indonesia, Inc."
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Email Perusahaan
+                      </span>
+                      <input
+                        type="email"
+                        value={profile.email}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, email: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="hr@company.com"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Industri
+                      </span>
+                      <select
+                        value={profile.industry}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, industry: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Pilih industri</option>
+                        <option>E-Commerce</option>
+                        <option>Energy</option>
+                        <option>Manufacturing</option>
+                        <option>Financial Services</option>
+                        <option>Technology</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Ukuran
+                      </span>
+                      <select
+                        value={profile.size}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, size: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Pilih ukuran</option>
+                        <option>1-10</option>
+                        <option>11-50</option>
+                        <option>51-200</option>
+                        <option>201-500</option>
+                        <option>500+</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-slate-600">
+                      Tentang perusahaan
+                    </span>
+                    <textarea
+                      value={profile.about}
+                      onChange={(e) =>
+                        setProfile((p) => ({ ...p, about: e.target.value }))
+                      }
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Visi, misi, budaya kerja, dsb."
+                    />
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Alamat kantor
+                      </span>
+                      <textarea
+                        value={profile.address}
+                        onChange={(e) =>
+                          setProfile((p) => ({ ...p, address: e.target.value }))
+                        }
+                        rows={3}
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="Jalan, nomor, dll."
+                      />
+                    </label>
+                    <div className="grid gap-4">
+                      <label className="block">
+                        <span className="mb-1 block text-sm text-slate-600">
+                          Kota / Kabupaten
+                        </span>
+                        <input
+                          value={profile.city}
+                          onChange={(e) =>
+                            setProfile((p) => ({ ...p, city: e.target.value }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                          placeholder="Jakarta Selatan"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-sm text-slate-600">
+                          Website (opsional)
+                        </span>
+                        <input
+                          value={profile.website}
+                          onChange={(e) =>
+                            setProfile((p) => ({ ...p, website: e.target.value }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                          placeholder="company.com"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Website & Sosial
+                    </span>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(
+                        [
+                          'website',
+                          'linkedin',
+                          'instagram',
+                          'facebook',
+                          'tiktok',
+                          'youtube',
+                        ] as const
+                      ).map((key) => (
+                        <input
+                          key={key}
+                          value={profile.socials[key] || ''}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              socials: { ...p.socials, [key]: e.target.value },
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                          placeholder={key[0].toUpperCase() + key.slice(1)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Kembali
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setBusy(true);
+                          setError(null);
+                          await submitStep2();
+                          setStep(3);
+                        } catch (e: any) {
+                          setError(e?.message || 'Gagal menyimpan profil.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={busy}
+                    >
+                      {busy ? 'Menyimpan…' : 'Selanjutnya'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ------------------------------- STEP 3 ------------------------------- */}
+              {step === 3 && (
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Pilih Paket</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Paket di bawah berasal dari konfigurasi admin (Monetisasi).
+                  </p>
+
+                  {plansLoading ? (
+                    <div className="mt-6 text-slate-500">Memuat paket…</div>
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-slate-400 text-xs">
-                      No logo
+                    <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {plans.map((p) => {
+                        const active = p.slug === selectedSlug;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setSelectedSlug(p.slug)}
+                            className={cx(
+                              'text-left rounded-2xl border p-5 transition focus:outline-none',
+                              active
+                                ? 'border-blue-500 ring-2 ring-blue-100'
+                                : 'border-slate-200 hover:border-slate-300'
+                            )}
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <h3
+                                className={cx(
+                                  'text-base sm:text-lg font-semibold',
+                                  active ? 'text-blue-700' : 'text-slate-900'
+                                )}
+                              >
+                                {p.name}
+                              </h3>
+                              <div
+                                className={cx(
+                                  'text-sm',
+                                  active ? 'text-blue-600' : 'text-slate-500'
+                                )}
+                              >
+                                {formatIDR(p.amount)}
+                              </div>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              /{p.interval}
+                            </div>
+                            <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                              {(p.description || '')
+                                .split('\n')
+                                .filter(Boolean)
+                                .slice(0, 4)
+                                .map((line, i) => (
+                                  <li key={i} className="flex items-start gap-2">
+                                    <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                    <span>{line}</span>
+                                  </li>
+                                ))}
+                              {!p.description && (
+                                <li className="text-slate-500/80">—</li>
+                              )}
+                            </ul>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+
+                  <div className="mt-6 rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Paket dipilih</span>
+                      <span className="font-semibold text-slate-900">
+                        {currentPlan?.name ?? '-'}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Subtotal</span>
+                      <span className="font-semibold text-slate-900">
+                        {currentPlan ? formatIDR(currentPlan.amount) : '-'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Kembali
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setBusy(true);
+                          setError(null);
+                          await submitStep3();
+                          setStep(4);
+                        } catch (e: any) {
+                          setError(e?.message || 'Gagal memulai pembayaran.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={busy || !selectedSlug}
+                    >
+                      {busy ? 'Memproses…' : 'Selanjutnya'}
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      const reader = new FileReader();
-                      reader.onload = (ev) =>
-                        setProfile((p) => ({
-                          ...p,
-                          logo: String(ev.target?.result || ''),
-                        }));
-                      reader.readAsDataURL(f);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
-                  >
-                    Unggah Logo
-                  </button>
-                </div>
-              </div>
+              )}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Nama Perusahaan
-                  </span>
-                  <input
-                    value={profile.name}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, name: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="e.g. ArkWork Indonesia, Inc."
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Email Perusahaan
-                  </span>
-                  <input
-                    type="email"
-                    value={profile.email}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, email: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="hr@company.com"
-                  />
-                </label>
-              </div>
+              {/* ------------------------------- STEP 4 ------------------------------- */}
+              {step === 4 && (
+                <div className="grid gap-5">
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div>
+                      <h2 className="text-xl font-semibold text-slate-900">
+                        Pasang Lowongan
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Jelaskan posisi, bidang, dan kualifikasi agar kandidat
+                        tepat.
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                      <div className="font-semibold">Tips</div>
+                      <ul className="mt-1 list-disc pl-4">
+                        <li>Gunakan judul spesifik</li>
+                        <li>Jelaskan tanggung jawab & benefit</li>
+                        <li>Tuliskan kualifikasi yang jelas</li>
+                      </ul>
+                    </div>
+                  </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Industri
-                  </span>
-                  <select
-                    value={profile.industry}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, industry: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">Pilih industri</option>
-                    <option>E-Commerce</option>
-                    <option>Energy</option>
-                    <option>Manufacturing</option>
-                    <option>Financial Services</option>
-                    <option>Technology</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Ukuran
-                  </span>
-                  <select
-                    value={profile.size}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, size: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">Pilih ukuran</option>
-                    <option>1-10</option>
-                    <option>11-50</option>
-                    <option>51-200</option>
-                    <option>201-500</option>
-                    <option>500+</option>
-                  </select>
-                </label>
-              </div>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Tentang perusahaan
-                </span>
-                <textarea
-                  value={profile.about}
-                  onChange={(e) =>
-                    setProfile((p) => ({ ...p, about: e.target.value }))
-                  }
-                  rows={4}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Visi, misi, budaya kerja, dsb."
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Alamat kantor
-                  </span>
-                  <textarea
-                    value={profile.address}
-                    onChange={(e) =>
-                      setProfile((p) => ({ ...p, address: e.target.value }))
-                    }
-                    rows={3}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Jalan, nomor, dll."
-                  />
-                </label>
-                <div className="grid gap-4">
                   <label className="block">
                     <span className="mb-1 block text-sm text-slate-600">
-                      Kota / Kabupaten
+                      Posisi Pekerjaan
                     </span>
                     <input
-                      value={profile.city}
+                      value={job.title}
                       onChange={(e) =>
-                        setProfile((p) => ({ ...p, city: e.target.value }))
+                        setJob((j) => ({ ...j, title: e.target.value }))
                       }
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="Jakarta Selatan"
+                      placeholder="Masukan posisi pekerjaan"
                     />
                   </label>
+
                   <label className="block">
                     <span className="mb-1 block text-sm text-slate-600">
-                      Website (opsional)
+                      Bidang Pekerjaan
                     </span>
-                    <input
-                      value={profile.website}
+                    <select
+                      value={job.functionArea}
                       onChange={(e) =>
-                        setProfile((p) => ({ ...p, website: e.target.value }))
+                        setJob((j) => ({ ...j, functionArea: e.target.value }))
                       }
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="company.com"
-                    />
+                    >
+                      <option value="">Pilih bidang pekerjaan</option>
+                      <option>Engineering</option>
+                      <option>Product</option>
+                      <option>Design</option>
+                      <option>Marketing</option>
+                      <option>Finance</option>
+                      <option>HR</option>
+                    </select>
                   </label>
-                </div>
-              </div>
 
-              <div>
-                <span className="mb-2 block text-sm font-medium text-slate-700">
-                  Website & Sosial
-                </span>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {(
-                    [
-                      'website',
-                      'linkedin',
-                      'instagram',
-                      'facebook',
-                      'tiktok',
-                      'youtube',
-                    ] as const
-                  ).map((key) => (
-                    <input
-                      key={key}
-                      value={profile.socials[key] || ''}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          socials: { ...p.socials, [key]: e.target.value },
-                        }))
-                      }
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder={key[0].toUpperCase() + key.slice(1)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
-                >
-                  Kembali
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setBusy(true);
-                      setError(null);
-                      await submitStep2();
-                      setStep(3);
-                    } catch (e: any) {
-                      setError(e?.message || 'Gagal menyimpan profil.');
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  disabled={busy}
-                >
-                  {busy ? 'Menyimpan…' : 'Selanjutnya'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------- STEP 3 ------------------------------- */}
-          {step === 3 && (
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">Pilih Paket</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Paket di bawah berasal dari konfigurasi admin (Monetisasi).
-              </p>
-
-              {plansLoading ? (
-                <div className="mt-6 text-slate-500">Memuat paket…</div>
-              ) : (
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {plans.map((p) => {
-                    const active = p.slug === selectedSlug;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setSelectedSlug(p.slug)}
-                        className={cx(
-                          'text-left rounded-2xl border p-5 transition focus:outline-none',
-                          active
-                            ? 'border-blue-500 ring-2 ring-blue-100'
-                            : 'border-slate-200 hover:border-slate-300'
-                        )}
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Level
+                      </span>
+                      <select
+                        value={job.level}
+                        onChange={(e) =>
+                          setJob((j) => ({ ...j, level: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
-                        <div className="flex items-baseline justify-between gap-2">
-                          <h3
-                            className={cx(
-                              'text-base sm:text-lg font-semibold',
-                              active ? 'text-blue-700' : 'text-slate-900'
-                            )}
-                          >
-                            {p.name}
-                          </h3>
-                          <div
-                            className={cx(
-                              'text-sm',
-                              active ? 'text-blue-600' : 'text-slate-500'
-                            )}
-                          >
-                            {formatIDR(p.amount)}
-                          </div>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          /{p.interval}
-                        </div>
-                        <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                          {(p.description || '')
-                            .split('\n')
-                            .filter(Boolean)
-                            .slice(0, 4)
-                            .map((line, i) => (
-                              <li key={i} className="flex items-start gap-2">
-                                <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                <span>{line}</span>
-                              </li>
-                            ))}
-                          {!p.description && (
-                            <li className="text-slate-500/80">—</li>
-                          )}
-                        </ul>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                        <option value="">Pilih level</option>
+                        <option>Intern</option>
+                        <option>Junior</option>
+                        <option>Mid</option>
+                        <option>Senior</option>
+                        <option>Manager</option>
+                      </select>
+                    </label>
 
-              <div className="mt-6 rounded-2xl border border-slate-200 p-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600">Paket dipilih</span>
-                  <span className="font-semibold text-slate-900">
-                    {currentPlan?.name ?? '-'}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between text-sm">
-                  <span className="text-slate-600">Subtotal</span>
-                  <span className="font-semibold text-slate-900">
-                    {currentPlan ? formatIDR(currentPlan.amount) : '-'}
-                  </span>
-                </div>
-              </div>
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Tipe Kerja
+                      </span>
+                      <select
+                        value={job.type}
+                        onChange={(e) =>
+                          setJob((j) => ({
+                            ...j,
+                            type: e.target.value as NewJob['type'],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="full_time">Full-time</option>
+                        <option value="part_time">Part-time</option>
+                        <option value="contract">Contract</option>
+                        <option value="internship">Internship</option>
+                      </select>
+                    </label>
 
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
-                >
-                  Kembali
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setBusy(true);
-                      setError(null);
-                      await submitStep3();
-                      setStep(4);
-                    } catch (e: any) {
-                      setError(e?.message || 'Gagal memulai pembayaran.');
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  disabled={busy || !selectedSlug}
-                >
-                  {busy ? 'Memproses…' : 'Selanjutnya'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------- STEP 4 ------------------------------- */}
-          {step === 4 && (
-            <div className="grid gap-5">
-              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-900">
-                    Pasang Lowongan
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Jelaskan posisi, bidang, dan kualifikasi agar kandidat
-                    tepat.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                  <div className="font-semibold">Tips</div>
-                  <ul className="mt-1 list-disc pl-4">
-                    <li>Gunakan judul spesifik</li>
-                    <li>Jelaskan tanggung jawab & benefit</li>
-                    <li>Tuliskan kualifikasi yang jelas</li>
-                  </ul>
-                </div>
-              </div>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Posisi Pekerjaan
-                </span>
-                <input
-                  value={job.title}
-                  onChange={(e) =>
-                    setJob((j) => ({ ...j, title: e.target.value }))
-                  }
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Masukan posisi pekerjaan"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Bidang Pekerjaan
-                </span>
-                <select
-                  value={job.functionArea}
-                  onChange={(e) =>
-                    setJob((j) => ({ ...j, functionArea: e.target.value }))
-                  }
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Pilih bidang pekerjaan</option>
-                  <option>Engineering</option>
-                  <option>Product</option>
-                  <option>Design</option>
-                  <option>Marketing</option>
-                  <option>Finance</option>
-                  <option>HR</option>
-                </select>
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Level
-                  </span>
-                  <select
-                    value={job.level}
-                    onChange={(e) =>
-                      setJob((j) => ({ ...j, level: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">Pilih level</option>
-                    <option>Intern</option>
-                    <option>Junior</option>
-                    <option>Mid</option>
-                    <option>Senior</option>
-                    <option>Manager</option>
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Tipe Kerja
-                  </span>
-                  <select
-                    value={job.type}
-                    onChange={(e) =>
-                      setJob((j) => ({
-                        ...j,
-                        type: e.target.value as NewJob['type'],
-                      }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="full_time">Full-time</option>
-                    <option value="part_time">Part-time</option>
-                    <option value="contract">Contract</option>
-                    <option value="internship">Internship</option>
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Mode Kerja
-                  </span>
-                  <select
-                    value={job.workMode}
-                    onChange={(e) =>
-                      setJob((j) => ({
-                        ...j,
-                        workMode: e.target.value as NewJob['workMode'],
-                      }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="onsite">On-site</option>
-                    <option value="remote">Remote</option>
-                    <option value="hybrid">Hybrid</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Lokasi
-                  </span>
-                  <input
-                    value={job.location}
-                    onChange={(e) =>
-                      setJob((j) => ({ ...j, location: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Jakarta / Surabaya / Remote"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-slate-600">
-                    Batas Lamar (opsional)
-                  </span>
-                  <input
-                    type="date"
-                    value={job.deadline}
-                    onChange={(e) =>
-                      setJob((j) => ({ ...j, deadline: e.target.value }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </label>
-              </div>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Deskripsi
-                </span>
-                <textarea
-                  value={job.description}
-                  onChange={(e) =>
-                    setJob((j) => ({ ...j, description: e.target.value }))
-                  }
-                  rows={5}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Gambarkan tanggung jawab, budaya tim, benefit, dll."
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Kualifikasi
-                </span>
-                <textarea
-                  value={job.requirements}
-                  onChange={(e) =>
-                    setJob((j) => ({ ...j, requirements: e.target.value }))
-                  }
-                  rows={4}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Contoh: 3+ tahun pengalaman React, terbiasa Next.js, dsb."
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-600">
-                  Tags (pisahkan koma)
-                </span>
-                <input
-                  value={job.tags}
-                  onChange={(e) =>
-                    setJob((j) => ({ ...j, tags: e.target.value }))
-                  }
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="react, nextjs, tailwind"
-                />
-              </label>
-
-              <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep(3)}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
-                >
-                  Kembali
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setBusy(true);
-                      setError(null);
-                      await submitStep4();
-                      setStep(5);
-                    } catch (e: any) {
-                      setError(e?.message || 'Gagal menyimpan lowongan.');
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  disabled={busy}
-                >
-                  {busy ? 'Menyimpan…' : 'Selanjutnya'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------- STEP 5 ------------------------------- */}
-          {step === 5 && (
-            <div className="grid gap-6">
-              <h2 className="text-xl font-semibold text-slate-900">
-                Verifikasi & Ringkasan
-              </h2>
-              <div className="grid gap-6 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">
-                    Profil Perusahaan
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Mode Kerja
+                      </span>
+                      <select
+                        value={job.workMode}
+                        onChange={(e) =>
+                          setJob((j) => ({
+                            ...j,
+                            workMode: e.target.value as NewJob['workMode'],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="onsite">On-site</option>
+                        <option value="remote">Remote</option>
+                        <option value="hybrid">Hybrid</option>
+                      </select>
+                    </label>
                   </div>
-                  <dl className="space-y-2 text-sm">
-                    <Row label="Nama">{profile.name || '-'}</Row>
-                    <Row label="Email">{profile.email || '-'}</Row>
-                    <Row label="Industri">{profile.industry || '-'}</Row>
-                    <Row label="Ukuran">{profile.size || '-'}</Row>
-                    <Row label="Kota">{profile.city || '-'}</Row>
-                    <Row label="Website">
-                      {profile.website ? normalizeUrl(profile.website) : '-'}
-                    </Row>
-                  </dl>
-                </div>
 
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">
-                    Paket
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Lokasi
+                      </span>
+                      <input
+                        value={job.location}
+                        onChange={(e) =>
+                          setJob((j) => ({ ...j, location: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="Jakarta / Surabaya / Remote"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-sm text-slate-600">
+                        Batas Lamar (opsional)
+                      </span>
+                      <input
+                        type="date"
+                        value={job.deadline}
+                        onChange={(e) =>
+                          setJob((j) => ({ ...j, deadline: e.target.value }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
                   </div>
-                  <dl className="space-y-2 text-sm">
-                    <Row label="Nama Paket">{currentPlan?.name ?? '-'}</Row>
-                    <Row label="Harga">
-                      {currentPlan ? formatIDR(currentPlan.amount) : '-'}
-                    </Row>
-                    <Row label="Interval">{currentPlan?.interval ?? '-'}</Row>
-                  </dl>
-                </div>
 
-                {/* Status Pembayaran */}
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">
-                    Status Pembayaran
-                  </div>
-                  <dl className="space-y-2 text-sm">
-                    <Row label="Status">
-                      {paid
-                        ? 'Lunas / Pending (diterima)'
-                        : 'Belum dibayar'}
-                    </Row>
-                  </dl>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">
-                    Lowongan
-                  </div>
-                  <dl className="grid gap-4 text-sm md:grid-cols-2">
-                    <Row label="Posisi">{job.title || '-'}</Row>
-                    <Row label="Bidang">{job.functionArea || '-'}</Row>
-                    <Row label="Level">{job.level || '-'}</Row>
-                    <Row label="Tipe">{job.type.replace('_', ' ')}</Row>
-                    <Row label="Mode Kerja">{job.workMode || '-'}</Row>
-                    <Row label="Lokasi">{job.location || '-'}</Row>
-                    <Row label="Batas Lamar">{job.deadline || '-'}</Row>
-                    <Row label="Tags">{job.tags || '-'}</Row>
-                  </dl>
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs font-medium text-slate-500">
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-slate-600">
                       Deskripsi
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm text-slate-700">
-                      {job.description || '-'}
-                    </p>
-                  </div>
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs font-medium text-slate-500">
-                      Kualifikasi
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm text-slate-700">
-                      {job.requirements || '-'}
-                    </p>
-                  </div>
-                </div>
-              </div>
+                    </span>
+                    <textarea
+                      value={job.description}
+                      onChange={(e) =>
+                        setJob((j) => ({ ...j, description: e.target.value }))
+                      }
+                      rows={5}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Gambarkan tanggung jawab, budaya tim, benefit, dll."
+                    />
+                  </label>
 
-              {error && (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {error}
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-slate-600">
+                      Kualifikasi
+                    </span>
+                    <textarea
+                      value={job.requirements}
+                      onChange={(e) =>
+                        setJob((j) => ({ ...j, requirements: e.target.value }))
+                      }
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Contoh: 3+ tahun pengalaman React, terbiasa Next.js, dsb."
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-slate-600">
+                      Tags (pisahkan koma)
+                    </span>
+                    <input
+                      value={job.tags}
+                      onChange={(e) =>
+                        setJob((j) => ({ ...j, tags: e.target.value }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="react, nextjs, tailwind"
+                    />
+                  </label>
+
+                  <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Kembali
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setBusy(true);
+                          setError(null);
+                          await submitStep4();
+                          setStep(5);
+                        } catch (e: any) {
+                          setError(e?.message || 'Gagal menyimpan lowongan.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={busy}
+                    >
+                      {busy ? 'Menyimpan…' : 'Selanjutnya'}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep(4)}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
-                >
-                  Kembali
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !paid}
-                  onClick={onFinish}
-                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  title={
-                    !paid ? 'Selesaikan pembayaran terlebih dahulu' : undefined
-                  }
-                >
-                  {busy ? 'Mengirim…' : 'Kirim'}
-                </button>
-              </div>
-            </div>
+              {/* ------------------------------- STEP 5 ------------------------------- */}
+              {step === 5 && (
+                <div className="grid gap-6">
+                  <h2 className="text-xl font-semibold text-slate-900">
+                    Verifikasi & Ringkasan
+                  </h2>
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="mb-3 text-sm font-semibold text-slate-900">
+                        Profil Perusahaan
+                      </div>
+                      <dl className="space-y-2 text-sm">
+                        <Row label="Nama">{profile.name || '-'}</Row>
+                        <Row label="Email">{profile.email || '-'}</Row>
+                        <Row label="Industri">{profile.industry || '-'}</Row>
+                        <Row label="Ukuran">{profile.size || '-'}</Row>
+                        <Row label="Kota">{profile.city || '-'}</Row>
+                        <Row label="Website">
+                          {profile.website ? normalizeUrl(profile.website) : '-'}
+                        </Row>
+                      </dl>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="mb-3 text-sm font-semibold text-slate-900">
+                        Paket
+                      </div>
+                      <dl className="space-y-2 text-sm">
+                        <Row label="Nama Paket">{currentPlan?.name ?? '-'}</Row>
+                        <Row label="Harga">
+                          {currentPlan ? formatIDR(currentPlan.amount) : '-'}
+                        </Row>
+                        <Row label="Interval">{currentPlan?.interval ?? '-'}</Row>
+                      </dl>
+                    </div>
+
+                    {/* Status Pembayaran */}
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="mb-3 text-sm font-semibold text-slate-900">
+                        Status Pembayaran
+                      </div>
+                      <dl className="space-y-2 text-sm">
+                        <Row label="Status">
+                          {paid
+                            ? 'Lunas / Pending (diterima)'
+                            : 'Belum dibayar'}
+                        </Row>
+                      </dl>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
+                      <div className="mb-3 text-sm font-semibold text-slate-900">
+                        Lowongan
+                      </div>
+                      <dl className="grid gap-4 text-sm md:grid-cols-2">
+                        <Row label="Posisi">{job.title || '-'}</Row>
+                        <Row label="Bidang">{job.functionArea || '-'}</Row>
+                        <Row label="Level">{job.level || '-'}</Row>
+                        <Row label="Tipe">{job.type.replace('_', ' ')}</Row>
+                        <Row label="Mode Kerja">{job.workMode || '-'}</Row>
+                        <Row label="Lokasi">{job.location || '-'}</Row>
+                        <Row label="Batas Lamar">{job.deadline || '-'}</Row>
+                        <Row label="Tags">{job.tags || '-'}</Row>
+                      </dl>
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-medium text-slate-500">
+                          Deskripsi
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm text-slate-700">
+                          {job.description || '-'}
+                        </p>
+                      </div>
+                      <div className="mt-3">
+                        <div className="mb-1 text-xs font-medium text-slate-500">
+                          Kualifikasi
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm text-slate-700">
+                          {job.requirements || '-'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Kembali
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || !paid}
+                      onClick={onFinish}
+                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      title={!paid ? 'Selesaikan pembayaran terlebih dahulu' : undefined}
+                    >
+                      {busy ? 'Mengirim…' : 'Kirim'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1424,3 +1540,4 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     </div>
   );
 }
+  

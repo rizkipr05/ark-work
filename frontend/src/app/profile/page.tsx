@@ -26,6 +26,7 @@ type StoredUser = {
 
 const LS_KEY = 'ark_users';
 const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:'; // dataURL thumbnail utk navbar
+const NAV_NAME_KEY_PREFIX = 'ark_nav_name:';     // display name untuk navbar
 const MAX_CV_MB = 2;
 const MAX_AVATAR_MB = 2;
 
@@ -183,6 +184,15 @@ const readUsers = (): StoredUser[] => {
 };
 const writeUsers = (arr: StoredUser[]) => localStorage.setItem(LS_KEY, JSON.stringify(arr));
 
+/** ================== Shared Name helpers (sinkron dgn navbar) ================== */
+function getNavName(email: string) {
+  return localStorage.getItem(NAV_NAME_KEY_PREFIX + email) ?? '';
+}
+function setNavName(email: string, name: string) {
+  localStorage.setItem(NAV_NAME_KEY_PREFIX + email, name);
+  window.dispatchEvent(new Event('ark:name-updated'));
+}
+
 /** ================== Small UI helpers ================== */
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="mb-1.5 block text-sm font-medium text-neutral-800">{children}</label>;
@@ -289,15 +299,16 @@ export default function ProfilePage() {
     return () => clearTimeout(id);
   }, [toast]);
 
-  // load biodata
+  // load biodata (PRIORITAS nama dari navbar -> fallback data user)
   useEffect(() => {
     if (!email) return;
     const users = readUsers();
     const u = users.find((x) => x.email === email);
-    setName(u?.name ?? '');
+
+    const navName = getNavName(email);
+    setName(navName || u?.name || '');
     setLocation(u?.profile?.location ?? '');
     setPhone(u?.profile?.phone ?? '');
-    // parse skills csv -> array
     const skillsCSV = u?.profile?.skills ?? '';
     setSkillTags(
       skillsCSV
@@ -308,6 +319,17 @@ export default function ProfilePage() {
     setCvMeta(u?.profile?.cv ?? null);
     setAvatarMeta(u?.profile?.photo ?? null);
   }, [email]);
+
+  // dengarkan perubahan nama dari navbar (dua arah)
+  useEffect(() => {
+    if (!email) return;
+    const onNavName = () => {
+      const latest = getNavName(email);
+      if (latest && latest !== name) setName(latest);
+    };
+    window.addEventListener('ark:name-updated', onNavName);
+    return () => window.removeEventListener('ark:name-updated', onNavName);
+  }, [email, name]);
 
   // objectURL CV
   useEffect(() => {
@@ -446,6 +468,10 @@ export default function ProfilePage() {
       if (idx >= 0) users[idx] = { ...users[idx], ...data };
       else users.push(data);
       writeUsers(users);
+
+      // sinkronkan nama ke navbar + trigger event
+      setNavName(email, name);
+
       setToast({ type: 'success', message: t('toast.saved') || 'Tersimpan.' });
     } catch {
       setToast({ type: 'error', message: t('toast.failed') || 'Gagal menyimpan.' });

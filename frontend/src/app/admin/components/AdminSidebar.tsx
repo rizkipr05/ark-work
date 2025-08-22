@@ -46,8 +46,6 @@ export default function AdminSidebar() {
 
   const menu = useMemo(() => ([
     { name: 'Dashboard', path: '/admin', icon: HomeIcon },
-    { name: 'Manage Landing Page', path: '/admin/landing', icon: LayoutIcon },
-    { name: 'Jobs Management', path: '/admin/jobs', icon: BriefcaseIcon },
     { name: 'Tenders Management', path: '/admin/tenders', icon: LayersIcon },
     { name: 'User Management', path: '/admin/users', icon: UsersIcon },
     { name: 'Monetisasi (Plans)', path: '/admin/monet', icon: MoneyIcon },

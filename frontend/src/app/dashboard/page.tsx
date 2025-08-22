@@ -9,8 +9,25 @@ import {useLocale, useTranslations} from 'next-intl';
 /** ================== Types ================== */
 type SimpleUser = { email?: string | null; name?: string | null } | null;
 type RecentItem = { jobId: string | number; title: string; date: string };
+type StoredUser = {
+  email: string;
+  name?: string;
+  profile?: {
+    location?: string;
+    phone?: string;
+    skills?: string; // CSV
+    cv?: { name: string; type: string; key: string } | null;
+    photo?: { name: string; type: string; key: string } | null;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+};
 
-/** ================== Ikon minimal (SVG) ================== */
+/** ================== Constants / Keys ================== */
+const LS_USERS_KEY = 'ark_users';
+const NAV_NAME_KEY_PREFIX = 'ark_nav_name:'; // kalau mau ambil nama dari navbar
+
+/** ================== Minimal Icons ================== */
 function ArrowRightIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
@@ -37,7 +54,7 @@ function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
       <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/>
-      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0  1 2 2v2" stroke="currentColor" strokeWidth="2"/>
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/>
     </svg>
   );
 }
@@ -45,6 +62,35 @@ function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
 /** ================== Skeleton kecil ================== */
 function LineSkeleton({w='100%'}:{w?:string}) {
   return <div className="h-3 rounded bg-neutral-200" style={{width: w}}/>;
+}
+
+/** ================== IndexedDB utils (read-only CV) ================== */
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('ark_db', 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('cv_files')) db.createObjectStore('cv_files');
+      if (!db.objectStoreNames.contains('avatar_files')) db.createObjectStore('avatar_files');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbHas(store: 'cv_files' | 'avatar_files', key: string): Promise<boolean> {
+  try {
+    const db = await openDB();
+    const ok = await new Promise<boolean>((res) => {
+      const tx = db.transaction(store, 'readonly');
+      const r = tx.objectStore(store).getKey(key);
+      r.onsuccess = () => res(!!r.result);
+      r.onerror = () => res(false);
+    });
+    db.close();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 /** ================== Page ================== */
@@ -57,19 +103,72 @@ export default function Dashboard() {
 
   const [recent, setRecent] = useState<RecentItem[]>([]);
 
+  // --- Profil Stats State ---
+  const [displayName, setDisplayName] = useState<string>('');
+  const [hasCv, setHasCv] = useState<boolean>(false);
+  const [skillsCount, setSkillsCount] = useState<number>(0);
+  const [profileFilled, setProfileFilled] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0); // 0..100, animated
+
   const dateFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit' }),
     [locale]
   );
 
-  useEffect(() => {
-    if (loading) return;
-
-    if (!user) {
-      router.replace('/auth/signin');
-      return;
+  // -------- helpers --------
+  function readUsersSafe(): StoredUser[] {
+    try {
+      return JSON.parse(localStorage.getItem(LS_USERS_KEY) ?? '[]') as StoredUser[];
+    } catch {
+      return [];
     }
+  }
 
+  async function refreshProfileStats(email: string) {
+    const users = readUsersSafe();
+    const u = users.find(x => x.email === email);
+
+    // Nama: ambil prioritas dari NAV_NAME agar konsisten dengan navbar
+    const navName = localStorage.getItem(NAV_NAME_KEY_PREFIX + email) ?? '';
+    const nameFinal = (navName || u?.name || '').trim();
+    setDisplayName(nameFinal || t('fallback.there'));
+
+    // Skills
+    const skillsCsv = u?.profile?.skills ?? '';
+    const skillsArr = skillsCsv.split(',').map(s => s.trim()).filter(Boolean);
+    setSkillsCount(skillsArr.length);
+
+    // Profil minimal terisi (contoh: name + location + phone)
+    const filled = Boolean(nameFinal) && Boolean(u?.profile?.location) && Boolean(u?.profile?.phone);
+    setProfileFilled(filled);
+
+    // CV
+    const metaKey = u?.profile?.cv?.key; // expected 'cv:email'
+    let cvOk = false;
+    if (metaKey) {
+      cvOk = await idbHas('cv_files', metaKey);
+    }
+    setHasCv(cvOk);
+
+    // Progress (contoh bobot sederhana)
+    // name/location/phone = 3 poin, cv = 1 poin, skills >=3 = 1 poin (maks 5 -> 100%)
+    let score = 0;
+    score += (nameFinal ? 1 : 0);
+    score += (u?.profile?.location ? 1 : 0);
+    score += (u?.profile?.phone ? 1 : 0);
+    score += (cvOk ? 1 : 0);
+    score += (skillsArr.length >= 3 ? 1 : 0);
+    const pct = Math.round((score / 5) * 100);
+
+    // animasi halus
+    setProgress(p => {
+      // animate towards pct
+      if (p === pct) return p;
+      return pct;
+    });
+  }
+
+  function refreshRecent(email: string) {
     try {
       const appsRaw = localStorage.getItem('ark_apps');
       const jobsRaw = localStorage.getItem('ark_jobs');
@@ -77,7 +176,7 @@ export default function Dashboard() {
       const apps = JSON.parse(appsRaw ?? '{}');
       const jobs: any[] = JSON.parse(jobsRaw ?? '[]');
 
-      const userKey = user?.email ?? '';
+      const userKey = email ?? '';
       const arr: RecentItem[] = (apps[userKey] ?? [])
         .slice(-3)
         .map((a: any) => {
@@ -94,7 +193,45 @@ export default function Dashboard() {
       console.error('Failed to parse localStorage:', e);
       setRecent([]);
     }
-  }, [loading, user, router, t]);
+  }
+
+  // -------- effects --------
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user?.email) {
+      router.replace('/auth/signin');
+      return;
+    }
+
+    refreshProfileStats(user.email);
+    refreshRecent(user.email);
+
+    // Realtime: bila ProfilePage mem-broadcast
+    const onProfileUpdated = () => {
+      if (user?.email) {
+        refreshProfileStats(user.email);
+        refreshRecent(user.email);
+      }
+    };
+    window.addEventListener('ark:profile-updated', onProfileUpdated);
+    window.addEventListener('ark:avatar-updated', onProfileUpdated); // optional, kalau mau re-render stats juga
+
+    // Storage listener (perubahan dari tab lain)
+    const onStorage = (e: StorageEvent) => {
+      if (!user?.email) return;
+      if (e.key?.startsWith(LS_USERS_KEY) || e.key === (NAV_NAME_KEY_PREFIX + user.email) || e.key === 'ark_apps') {
+        onProfileUpdated();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener('ark:profile-updated', onProfileUpdated);
+      window.removeEventListener('ark:avatar-updated', onProfileUpdated);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [loading, user?.email, router, t]);
 
   if (loading || !user) {
     // Full-page skeleton state
@@ -134,8 +271,6 @@ export default function Dashboard() {
     );
   }
 
-  const displayName = user?.name?.trim() || t('fallback.there');
-
   return (
     <div className="min-h-screen bg-neutral-50 py-10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -149,7 +284,7 @@ export default function Dashboard() {
                   {t('greetingSmall') || 'Welcome back,'}
                 </p>
                 <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                  {t('greeting', {name: displayName})}
+                  {t('greeting', {name: displayName || t('fallback.there')})}
                 </h1>
                 <p className="mt-2 max-w-xl text-sm text-neutral-300">
                   {t('hero.subtitle') || 'Pantau profil dan lamaran terakhirmu di satu tempat.'}
@@ -179,7 +314,7 @@ export default function Dashboard() {
         {/* Content grid */}
         <section className="mt-8 grid gap-6 md:grid-cols-2">
 
-          {/* Profile card */}
+          {/* Profile card (TERHUBUNG DGN ProfilePage) */}
           <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-neutral-900">
@@ -194,6 +329,21 @@ export default function Dashboard() {
               {t('profile.desc')}
             </p>
 
+            {/* Progress kelengkapan */}
+            <div className="mt-4">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs text-neutral-500">{t('profile.completeness') || 'Kelengkapan Profil'}</span>
+                <span className="text-xs font-medium text-neutral-700">{progress}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+                <div
+                  className="h-2 rounded-full bg-neutral-900 transition-[width] duration-500 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+
+            {/* CTA ke profil */}
             <div className="mt-5">
               <Link
                 href="/profile"
@@ -204,23 +354,28 @@ export default function Dashboard() {
               </Link>
             </div>
 
+            {/* Stats dinamis */}
             <div className="mt-6 grid grid-cols-3 gap-3 text-center">
               <div className="rounded-xl border border-neutral-200 p-3">
                 <p className="text-xs text-neutral-500">{t('profile.stats.profile')}</p>
-                <p className="mt-1 text-lg font-semibold text-neutral-900">✔︎</p>
+                <p className={`mt-1 text-lg font-semibold ${profileFilled ? 'text-green-600' : 'text-amber-600'}`}>
+                  {profileFilled ? '✔︎' : 'Lengkapi'}
+                </p>
               </div>
               <div className="rounded-xl border border-neutral-200 p-3">
                 <p className="text-xs text-neutral-500">{t('profile.stats.cv')}</p>
-                <p className="mt-1 text-lg font-semibold text-neutral-900">—</p>
+                <p className={`mt-1 text-lg font-semibold ${hasCv ? 'text-green-600' : 'text-amber-600'}`}>
+                  {hasCv ? 'Ada' : 'Belum'}
+                </p>
               </div>
               <div className="rounded-xl border border-neutral-200 p-3">
                 <p className="text-xs text-neutral-500">{t('profile.stats.skills')}</p>
-                <p className="mt-1 text-lg font-semibold text-neutral-900">—</p>
+                <p className="mt-1 text-lg font-semibold text-neutral-900">{skillsCount}</p>
               </div>
             </div>
           </div>
 
-          {/* Recent activity */}
+          {/* Recent activity (tetap) */}
           <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-neutral-900">{t('recent.title')}</h3>

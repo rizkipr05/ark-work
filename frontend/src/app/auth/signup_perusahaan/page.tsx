@@ -78,6 +78,24 @@ type SignupCompanyPayload = {
   website?: string;
 };
 
+/* ---------- Admin Payments (local) ---------- */
+type PaymentRecord = {
+  id: string;
+  createdAt: string;
+  employerId: string;
+  company: string;
+  email: string;
+  planId: string;
+  planSlug: string;
+  planName: string;
+  amount: number;
+  currency: string;
+  interval: string;
+  status: 'success' | 'pending' | 'error' | 'initiated';
+  channel?: string;
+  raw?: any;
+};
+
 /* ------------------------------- Globals -------------------------------- */
 declare global {
   interface Window {
@@ -139,9 +157,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     try {
       const j = await res.json();
       msg = j?.error || j?.message || msg;
-    } catch {
-      // ignore
-    }
+    } catch {}
     throw new Error(msg);
   }
   return res.json();
@@ -159,13 +175,39 @@ function getPaymentLink(plan?: Plan | null): string | null {
     );
   return null;
 }
+function uuid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+/* ------ Simpan Pembayaran ke localStorage + broadcast agar dibaca Admin ------ */
+const LS_PAYMENTS_KEY = 'ark_admin_payments';
+
+function readPayments(): PaymentRecord[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_PAYMENTS_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+function writePayments(arr: PaymentRecord[]) {
+  localStorage.setItem(LS_PAYMENTS_KEY, JSON.stringify(arr));
+  // trigger listener di halaman admin (beberapa kanal supaya kompatibel)
+  try { new BroadcastChannel('ark_payments').postMessage({ type: 'payment:new' }); } catch {}
+  localStorage.setItem('ark:payment:ping', JSON.stringify({ ts: Date.now() }));
+  window.dispatchEvent(new CustomEvent('ark:payment'));
+}
+function savePaymentRecord(rec: PaymentRecord) {
+  const arr = readPayments();
+  arr.unshift(rec);
+  writePayments(arr);
+}
 
 /* --------------------------------- Page ---------------------------------- */
 export default function Page() {
   const t = useTranslations('companySignup');
   const router = useRouter();
 
-  const [mode, setMode] = useState<Mode>('signin'); // <-- tambah tab login
+  const [mode, setMode] = useState<Mode>('signin');
   const [error, setError] = useState<string | null>(null);
 
   /* ------------- SIGNIN (perusahaan) ------------- */
@@ -181,12 +223,9 @@ export default function Page() {
       setSiBusy(true);
       setError(null);
 
-      // /auth/signin milik backend employer-admin
       await apiPost('/auth/signin', {
         email: siEmail.trim(),
         password: siPw,
-        // employerSlug opsional, kirim kalau kamu butuh memilih perusahaan spesifik
-        // employerSlug: 'blue-genc'
       });
 
       router.push('/employer');
@@ -198,7 +237,7 @@ export default function Page() {
     }
   }
 
-  /* ------------- SIGNUP (wizard 5 step – kode kamu) ------------- */
+  /* ------------- SIGNUP (wizard 5 step) ------------- */
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
   const [employerId, setEmployerId] = useState<string | null>(null);
@@ -264,7 +303,7 @@ export default function Page() {
 
       setEmployerId(resp.employerId);
       setStep(2);
-      setMode('signup'); // tetap di mode signup
+      setMode('signup');
     } catch (err: unknown) {
       setError((err as { message?: string })?.message ?? t('error.default'));
     } finally {
@@ -373,9 +412,24 @@ export default function Page() {
     const plan = plans.find((p) => p.slug === selectedSlug);
     if (!plan) throw new Error('Paket tidak ditemukan.');
 
-    // Payment Link (opsional)
+    // Payment Link (tanpa callback)
     const link = !FORCE_SNAP ? getPaymentLink(plan) : null;
     if (link) {
+      savePaymentRecord({
+        id: uuid(),
+        createdAt: new Date().toISOString(),
+        employerId,
+        company: profile.name || company,
+        email: profile.email || email,
+        planId: plan.id,
+        planSlug: plan.slug,
+        planName: plan.name,
+        amount: plan.amount,
+        currency: plan.currency,
+        interval: plan.interval,
+        status: 'initiated',
+        channel: 'payment_link',
+      });
       window.open(link, '_blank', 'noopener,noreferrer');
       return;
     }
@@ -399,9 +453,7 @@ export default function Page() {
       try {
         const j = await res.json();
         msg = j?.error || j?.message || msg;
-      } catch {
-        // ignore
-      }
+      } catch {}
       throw new Error(msg);
     }
 
@@ -410,20 +462,85 @@ export default function Page() {
     if (window.snap?.pay) {
       await new Promise<void>((resolve, reject) => {
         window.snap!.pay(token, {
-          onSuccess: async () => {
+          onSuccess: async (result) => {
             setPaid(true);
+            savePaymentRecord({
+              id: (result?.order_id || result?.transaction_id || token || uuid()) as string,
+              createdAt: new Date().toISOString(),
+              employerId,
+              company: profile.name || company,
+              email: profile.email || email,
+              planId: plan.id,
+              planSlug: plan.slug,
+              planName: plan.name,
+              amount: plan.amount,
+              currency: plan.currency,
+              interval: plan.interval,
+              status: 'success',
+              channel: 'snap',
+              raw: result,
+            });
             resolve();
           },
-          onPending: async () => {
+          onPending: async (result) => {
             setPaid(true);
+            savePaymentRecord({
+              id: (result?.order_id || result?.transaction_id || token || uuid()) as string,
+              createdAt: new Date().toISOString(),
+              employerId,
+              company: profile.name || company,
+              email: profile.email || email,
+              planId: plan.id,
+              planSlug: plan.slug,
+              planName: plan.name,
+              amount: plan.amount,
+              currency: plan.currency,
+              interval: plan.interval,
+              status: 'pending',
+              channel: 'snap',
+              raw: result,
+            });
             resolve();
           },
-          onError: (e: any) => reject(e),
+          onError: (e: any) => {
+            savePaymentRecord({
+              id: (e?.order_id || token || uuid()) as string,
+              createdAt: new Date().toISOString(),
+              employerId,
+              company: profile.name || company,
+              email: profile.email || email,
+              planId: plan.id,
+              planSlug: plan.slug,
+              planName: plan.name,
+              amount: plan.amount,
+              currency: plan.currency,
+              interval: plan.interval,
+              status: 'error',
+              channel: 'snap',
+              raw: e,
+            });
+            reject(e);
+          },
           onClose: () => reject(new Error('Pembayaran ditutup sebelum selesai')),
         });
       });
     } else {
-      // Fallback: Snap redirect
+      // Fallback: Snap redirect (tanpa callback)
+      savePaymentRecord({
+        id: token,
+        createdAt: new Date().toISOString(),
+        employerId,
+        company: profile.name || company,
+        email: profile.email || email,
+        planId: plan.id,
+        planSlug: plan.slug,
+        planName: plan.name,
+        amount: plan.amount,
+        currency: plan.currency,
+        interval: plan.interval,
+        status: 'initiated',
+        channel: 'snap_redirect',
+      });
       window.open(redirect_url, '_blank', 'noopener,noreferrer');
     }
   }
@@ -741,25 +858,10 @@ export default function Page() {
                         {showPw ? '🙈' : '👁️'}
                       </button>
                     </div>
-                    <div
-                      className="mt-1 flex items-center gap-2"
-                      aria-hidden="true"
-                    >
-                      <div
-                        className={`h-1 w-1/3 rounded ${
-                          pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'
-                        }`}
-                      />
-                      <div
-                        className={`h-1 w-1/3 rounded ${
-                          pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'
-                        }`}
-                      />
-                      <div
-                        className={`h-1 w-1/3 rounded ${
-                          strong ? 'bg-emerald-500' : 'bg-slate-200'
-                        }`}
-                      />
+                    <div className="mt-1 flex items-center gap-2" aria-hidden="true">
+                      <div className={`h-1 w-1/3 rounded ${pw.length >= 6 ? 'bg-amber-400' : 'bg-slate-200'}`} />
+                      <div className={`h-1 w-1/3 rounded ${pw.length >= 8 ? 'bg-amber-500' : 'bg-slate-200'}`} />
+                      <div className={`h-1 w-1/3 rounded ${strong ? 'bg-emerald-500' : 'bg-slate-200'}`} />
                     </div>
                   </label>
 
@@ -790,9 +892,7 @@ export default function Page() {
                     </div>
                     {confirm.length > 0 && (
                       <p
-                        className={`mt-1 text-xs ${
-                          pw === confirm ? 'text-emerald-600' : 'text-rose-600'
-                        }`}
+                        className={`mt-1 text-xs ${pw === confirm ? 'text-emerald-600' : 'text-rose-600'}`}
                         role="status"
                         aria-live="polite"
                       >
@@ -815,10 +915,7 @@ export default function Page() {
                         Terms of Service
                       </Link>{' '}
                       and{' '}
-                      <Link
-                        href="/privacy"
-                        className="text-blue-700 hover:underline"
-                      >
+                      <Link href="/privacy" className="text-blue-700 hover:underline">
                         Privacy Policy
                       </Link>
                       .
@@ -849,11 +946,7 @@ export default function Page() {
                     <div className="h-16 w-16 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
                       {profile.logo ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={profile.logo}
-                          alt="Logo preview"
-                          className="h-full w-full object-cover"
-                        />
+                        <img src={profile.logo} alt="Logo preview" className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-slate-400 text-xs">
                           No logo
@@ -890,28 +983,20 @@ export default function Page() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Nama Perusahaan
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Nama Perusahaan</span>
                       <input
                         value={profile.name}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, name: e.target.value }))
-                        }
+                        onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                         placeholder="e.g. ArkWork Indonesia, Inc."
                       />
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Email Perusahaan
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Email Perusahaan</span>
                       <input
                         type="email"
                         value={profile.email}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, email: e.target.value }))
-                        }
+                        onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                         placeholder="hr@company.com"
                       />
@@ -920,14 +1005,10 @@ export default function Page() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Industri
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Industri</span>
                       <select
                         value={profile.industry}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, industry: e.target.value }))
-                        }
+                        onChange={(e) => setProfile((p) => ({ ...p, industry: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
                         <option value="">Pilih industri</option>
@@ -939,14 +1020,10 @@ export default function Page() {
                       </select>
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Ukuran
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Ukuran</span>
                       <select
                         value={profile.size}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, size: e.target.value }))
-                        }
+                        onChange={(e) => setProfile((p) => ({ ...p, size: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
                         <option value="">Pilih ukuran</option>
@@ -960,14 +1037,10 @@ export default function Page() {
                   </div>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Tentang perusahaan
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Tentang perusahaan</span>
                     <textarea
                       value={profile.about}
-                      onChange={(e) =>
-                        setProfile((p) => ({ ...p, about: e.target.value }))
-                      }
+                      onChange={(e) => setProfile((p) => ({ ...p, about: e.target.value }))}
                       rows={4}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Visi, misi, budaya kerja, dsb."
@@ -976,14 +1049,10 @@ export default function Page() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Alamat kantor
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Alamat kantor</span>
                       <textarea
                         value={profile.address}
-                        onChange={(e) =>
-                          setProfile((p) => ({ ...p, address: e.target.value }))
-                        }
+                        onChange={(e) => setProfile((p) => ({ ...p, address: e.target.value }))}
                         rows={3}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                         placeholder="Jalan, nomor, dll."
@@ -991,27 +1060,19 @@ export default function Page() {
                     </label>
                     <div className="grid gap-4">
                       <label className="block">
-                        <span className="mb-1 block text-sm text-slate-600">
-                          Kota / Kabupaten
-                        </span>
+                        <span className="mb-1 block text-sm text-slate-600">Kota / Kabupaten</span>
                         <input
                           value={profile.city}
-                          onChange={(e) =>
-                            setProfile((p) => ({ ...p, city: e.target.value }))
-                          }
+                          onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
                           className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                           placeholder="Jakarta Selatan"
                         />
                       </label>
                       <label className="block">
-                        <span className="mb-1 block text-sm text-slate-600">
-                          Website (opsional)
-                        </span>
+                        <span className="mb-1 block text-sm text-slate-600">Website (opsional)</span>
                         <input
                           value={profile.website}
-                          onChange={(e) =>
-                            setProfile((p) => ({ ...p, website: e.target.value }))
-                          }
+                          onChange={(e) => setProfile((p) => ({ ...p, website: e.target.value }))}
                           className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                           placeholder="company.com"
                         />
@@ -1020,29 +1081,13 @@ export default function Page() {
                   </div>
 
                   <div>
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Website & Sosial
-                    </span>
+                    <span className="mb-2 block text-sm font-medium text-slate-700">Website & Sosial</span>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      {(
-                        [
-                          'website',
-                          'linkedin',
-                          'instagram',
-                          'facebook',
-                          'tiktok',
-                          'youtube',
-                        ] as const
-                      ).map((key) => (
+                      {(['website','linkedin','instagram','facebook','tiktok','youtube'] as const).map((key) => (
                         <input
                           key={key}
                           value={profile.socials[key] || ''}
-                          onChange={(e) =>
-                            setProfile((p) => ({
-                              ...p,
-                              socials: { ...p.socials, [key]: e.target.value },
-                            }))
-                          }
+                          onChange={(e) => setProfile((p) => ({ ...p, socials: { ...p.socials, [key]: e.target.value } }))}
                           className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                           placeholder={key[0].toUpperCase() + key.slice(1)}
                         />
@@ -1102,32 +1147,18 @@ export default function Page() {
                             onClick={() => setSelectedSlug(p.slug)}
                             className={cx(
                               'text-left rounded-2xl border p-5 transition focus:outline-none',
-                              active
-                                ? 'border-blue-500 ring-2 ring-blue-100'
-                                : 'border-slate-200 hover:border-slate-300'
+                              active ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'
                             )}
                           >
                             <div className="flex items-baseline justify-between gap-2">
-                              <h3
-                                className={cx(
-                                  'text-base sm:text-lg font-semibold',
-                                  active ? 'text-blue-700' : 'text-slate-900'
-                                )}
-                              >
+                              <h3 className={cx('text-base sm:text-lg font-semibold', active ? 'text-blue-700' : 'text-slate-900')}>
                                 {p.name}
                               </h3>
-                              <div
-                                className={cx(
-                                  'text-sm',
-                                  active ? 'text-blue-600' : 'text-slate-500'
-                                )}
-                              >
+                              <div className={cx('text-sm', active ? 'text-blue-600' : 'text-slate-500')}>
                                 {formatIDR(p.amount)}
                               </div>
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              /{p.interval}
-                            </div>
+                            <div className="mt-1 text-xs text-slate-500">/{p.interval}</div>
                             <ul className="mt-3 space-y-2 text-sm text-slate-600">
                               {(p.description || '')
                                 .split('\n')
@@ -1139,9 +1170,7 @@ export default function Page() {
                                     <span>{line}</span>
                                   </li>
                                 ))}
-                              {!p.description && (
-                                <li className="text-slate-500/80">—</li>
-                              )}
+                              {!p.description && <li className="text-slate-500/80">—</li>}
                             </ul>
                           </button>
                         );
@@ -1152,15 +1181,11 @@ export default function Page() {
                   <div className="mt-6 rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-600">Paket dipilih</span>
-                      <span className="font-semibold text-slate-900">
-                        {currentPlan?.name ?? '-'}
-                      </span>
+                      <span className="font-semibold text-slate-900">{currentPlan?.name ?? '-'}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-sm">
                       <span className="text-slate-600">Subtotal</span>
-                      <span className="font-semibold text-slate-900">
-                        {currentPlan ? formatIDR(currentPlan.amount) : '-'}
-                      </span>
+                      <span className="font-semibold text-slate-900">{currentPlan ? formatIDR(currentPlan.amount) : '-'}</span>
                     </div>
                   </div>
 
@@ -1200,12 +1225,9 @@ export default function Page() {
                 <div className="grid gap-5">
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
-                      <h2 className="text-xl font-semibold text-slate-900">
-                        Pasang Lowongan
-                      </h2>
+                      <h2 className="text-xl font-semibold text-slate-900">Pasang Lowongan</h2>
                       <p className="mt-1 text-sm text-slate-600">
-                        Jelaskan posisi, bidang, dan kualifikasi agar kandidat
-                        tepat.
+                        Jelaskan posisi, bidang, dan kualifikasi agar kandidat tepat.
                       </p>
                     </div>
                     <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
@@ -1219,28 +1241,20 @@ export default function Page() {
                   </div>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Posisi Pekerjaan
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Posisi Pekerjaan</span>
                     <input
                       value={job.title}
-                      onChange={(e) =>
-                        setJob((j) => ({ ...j, title: e.target.value }))
-                      }
+                      onChange={(e) => setJob((j) => ({ ...j, title: e.target.value }))}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Masukan posisi pekerjaan"
                     />
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Bidang Pekerjaan
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Bidang Pekerjaan</span>
                     <select
                       value={job.functionArea}
-                      onChange={(e) =>
-                        setJob((j) => ({ ...j, functionArea: e.target.value }))
-                      }
+                      onChange={(e) => setJob((j) => ({ ...j, functionArea: e.target.value }))}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     >
                       <option value="">Pilih bidang pekerjaan</option>
@@ -1255,14 +1269,10 @@ export default function Page() {
 
                   <div className="grid gap-4 sm:grid-cols-3">
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Level
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Level</span>
                       <select
                         value={job.level}
-                        onChange={(e) =>
-                          setJob((j) => ({ ...j, level: e.target.value }))
-                        }
+                        onChange={(e) => setJob((j) => ({ ...j, level: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
                         <option value="">Pilih level</option>
@@ -1275,16 +1285,11 @@ export default function Page() {
                     </label>
 
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Tipe Kerja
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Tipe Kerja</span>
                       <select
                         value={job.type}
                         onChange={(e) =>
-                          setJob((j) => ({
-                            ...j,
-                            type: e.target.value as NewJob['type'],
-                          }))
+                          setJob((j) => ({ ...j, type: e.target.value as NewJob['type'] }))
                         }
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
@@ -1296,16 +1301,11 @@ export default function Page() {
                     </label>
 
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Mode Kerja
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Mode Kerja</span>
                       <select
                         value={job.workMode}
                         onChange={(e) =>
-                          setJob((j) => ({
-                            ...j,
-                            workMode: e.target.value as NewJob['workMode'],
-                          }))
+                          setJob((j) => ({ ...j, workMode: e.target.value as NewJob['workMode'] }))
                         }
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       >
@@ -1318,42 +1318,30 @@ export default function Page() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Lokasi
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Lokasi</span>
                       <input
                         value={job.location}
-                        onChange={(e) =>
-                          setJob((j) => ({ ...j, location: e.target.value }))
-                        }
+                        onChange={(e) => setJob((j) => ({ ...j, location: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                         placeholder="Jakarta / Surabaya / Remote"
                       />
                     </label>
                     <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">
-                        Batas Lamar (opsional)
-                      </span>
+                      <span className="mb-1 block text-sm text-slate-600">Batas Lamar (opsional)</span>
                       <input
                         type="date"
                         value={job.deadline}
-                        onChange={(e) =>
-                          setJob((j) => ({ ...j, deadline: e.target.value }))
-                        }
+                        onChange={(e) => setJob((j) => ({ ...j, deadline: e.target.value }))}
                         className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       />
                     </label>
                   </div>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Deskripsi
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Deskripsi</span>
                     <textarea
                       value={job.description}
-                      onChange={(e) =>
-                        setJob((j) => ({ ...j, description: e.target.value }))
-                      }
+                      onChange={(e) => setJob((j) => ({ ...j, description: e.target.value }))}
                       rows={5}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Gambarkan tanggung jawab, budaya tim, benefit, dll."
@@ -1361,14 +1349,10 @@ export default function Page() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Kualifikasi
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Kualifikasi</span>
                     <textarea
                       value={job.requirements}
-                      onChange={(e) =>
-                        setJob((j) => ({ ...j, requirements: e.target.value }))
-                      }
+                      onChange={(e) => setJob((j) => ({ ...j, requirements: e.target.value }))}
                       rows={4}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="Contoh: 3+ tahun pengalaman React, terbiasa Next.js, dsb."
@@ -1376,14 +1360,10 @@ export default function Page() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">
-                      Tags (pisahkan koma)
-                    </span>
+                    <span className="mb-1 block text-sm text-slate-600">Tags (pisahkan koma)</span>
                     <input
                       value={job.tags}
-                      onChange={(e) =>
-                        setJob((j) => ({ ...j, tags: e.target.value }))
-                      }
+                      onChange={(e) => setJob((j) => ({ ...j, tags: e.target.value }))}
                       className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                       placeholder="react, nextjs, tailwind"
                     />
@@ -1423,14 +1403,10 @@ export default function Page() {
               {/* ------------------------------- STEP 5 ------------------------------- */}
               {step === 5 && (
                 <div className="grid gap-6">
-                  <h2 className="text-xl font-semibold text-slate-900">
-                    Verifikasi & Ringkasan
-                  </h2>
+                  <h2 className="text-xl font-semibold text-slate-900">Verifikasi & Ringkasan</h2>
                   <div className="grid gap-6 md:grid-cols-2">
                     <div className="rounded-2xl border border-slate-200 p-4">
-                      <div className="mb-3 text-sm font-semibold text-slate-900">
-                        Profil Perusahaan
-                      </div>
+                      <div className="mb-3 text-sm font-semibold text-slate-900">Profil Perusahaan</div>
                       <dl className="space-y-2 text-sm">
                         <Row label="Nama">{profile.name || '-'}</Row>
                         <Row label="Email">{profile.email || '-'}</Row>
@@ -1444,36 +1420,26 @@ export default function Page() {
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 p-4">
-                      <div className="mb-3 text-sm font-semibold text-slate-900">
-                        Paket
-                      </div>
+                      <div className="mb-3 text-sm font-semibold text-slate-900">Paket</div>
                       <dl className="space-y-2 text-sm">
                         <Row label="Nama Paket">{currentPlan?.name ?? '-'}</Row>
-                        <Row label="Harga">
-                          {currentPlan ? formatIDR(currentPlan.amount) : '-'}
-                        </Row>
+                        <Row label="Harga">{currentPlan ? formatIDR(currentPlan.amount) : '-'}</Row>
                         <Row label="Interval">{currentPlan?.interval ?? '-'}</Row>
                       </dl>
                     </div>
 
                     {/* Status Pembayaran */}
                     <div className="rounded-2xl border border-slate-200 p-4">
-                      <div className="mb-3 text-sm font-semibold text-slate-900">
-                        Status Pembayaran
-                      </div>
+                      <div className="mb-3 text-sm font-semibold text-slate-900">Status Pembayaran</div>
                       <dl className="space-y-2 text-sm">
                         <Row label="Status">
-                          {paid
-                            ? 'Lunas / Pending (diterima)'
-                            : 'Belum dibayar'}
+                          {paid ? 'Lunas / Pending (diterima)' : 'Belum dibayar'}
                         </Row>
                       </dl>
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
-                      <div className="mb-3 text-sm font-semibold text-slate-900">
-                        Lowongan
-                      </div>
+                      <div className="mb-3 text-sm font-semibold text-slate-900">Lowongan</div>
                       <dl className="grid gap-4 text-sm md:grid-cols-2">
                         <Row label="Posisi">{job.title || '-'}</Row>
                         <Row label="Bidang">{job.functionArea || '-'}</Row>
@@ -1485,17 +1451,13 @@ export default function Page() {
                         <Row label="Tags">{job.tags || '-'}</Row>
                       </dl>
                       <div className="mt-3">
-                        <div className="mb-1 text-xs font-medium text-slate-500">
-                          Deskripsi
-                        </div>
+                        <div className="mb-1 text-xs font-medium text-slate-500">Deskripsi</div>
                         <p className="whitespace-pre-wrap text-sm text-slate-700">
                           {job.description || '-'}
                         </p>
                       </div>
                       <div className="mt-3">
-                        <div className="mb-1 text-xs font-medium text-slate-500">
-                          Kualifikasi
-                        </div>
+                        <div className="mb-1 text-xs font-medium text-slate-500">Kualifikasi</div>
                         <p className="whitespace-pre-wrap text-sm text-slate-700">
                           {job.requirements || '-'}
                         </p>
@@ -1540,4 +1502,3 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     </div>
   );
 }
-  

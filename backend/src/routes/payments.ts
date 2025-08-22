@@ -3,17 +3,27 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { createSnapForPlan, handleMidtransNotification } from '../services/midtrans';
 
-// ===== Auth placeholder (sesuaikan dengan sistemmu) =====
+/* ================= Auth placeholder (sesuaikan dengan sistemmu) ================= */
 function requireAuth(req: any, _res: Response, next: NextFunction) {
   // contoh: req.user = { id: 'user-123', employerId: 'emp-456' }
   return next();
 }
 function getMaybeUserId(req: Request): string | undefined {
   const anyReq = req as any;
-  return anyReq?.user?.id ?? anyReq?.session?.user?.id ?? req.body?.userId;
+  return anyReq?.user?.id ?? anyReq?.session?.user?.id ?? (req.body as any)?.userId;
 }
 
 const r = Router();
+
+/* ================= Utils: serialize angka aman ================= */
+function toNumberSafe(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return v;
+  if (typeof (v as any)?.toNumber === 'function') return (v as any).toNumber(); // Prisma Decimal
+  if (typeof v === 'bigint') return Number(v); // BigInt
+  if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) return Number(v);
+  return Number(v);
+}
 
 /* ================= LIST (admin/inbox) ================= */
 r.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -24,7 +34,7 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const where = status ? { status } : undefined;
 
-    const items = await prisma.payment.findMany({
+    const rows = await prisma.payment.findMany({
       where,
       take,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
@@ -32,20 +42,45 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
       select: {
         id: true,
         orderId: true,
-        status: true,
+        status: true,           // settlement | pending | capture | cancel | expire | deny | refund | failure
         method: true,
-        grossAmount: true,
+        grossAmount: true,      // Decimal/BigInt
         currency: true,
         createdAt: true,
         transactionId: true,
-        redirectUrl: true,
-        token: true,
         plan: { select: { id: true, slug: true, name: true, interval: true } },
         employer: { select: { id: true, displayName: true, legalName: true, slug: true } },
       },
     });
 
-    const nextCursor = items.length === take ? items[items.length - 1].id : null;
+    const items = rows.map((p) => ({
+      id: p.id,
+      orderId: p.orderId,
+      status: p.status,
+      method: p.method ?? null,
+      grossAmount: toNumberSafe(p.grossAmount) ?? 0,
+      currency: p.currency ?? 'IDR',
+      createdAt: p.createdAt?.toISOString?.() ?? new Date(p.createdAt as any).toISOString(),
+      transactionId: p.transactionId ?? null,
+      plan: p.plan
+        ? {
+            id: p.plan.id,
+            slug: p.plan.slug,
+            name: p.plan.name,
+            interval: p.plan.interval,
+          }
+        : null,
+      employer: p.employer
+        ? {
+            id: p.employer.id,
+            displayName: p.employer.displayName,
+            legalName: p.employer.legalName,
+            slug: p.employer.slug,
+          }
+        : null,
+    }));
+
+    const nextCursor = rows.length === take ? rows[rows.length - 1].id : null;
     res.json({ items, nextCursor });
   } catch (e) {
     next(e);
@@ -63,18 +98,19 @@ r.get('/plans', async (_req: Request, res: Response, next: NextFunction) => {
         slug: true,
         name: true,
         description: true,
-        amount: true,     // bisa BigInt di DB
+        amount: true,     // Decimal/BigInt
         currency: true,
         interval: true,
         active: true,
-        priceId: true,    // gunakan ini untuk Payment Link ID (opsional)
-        // OPTIONAL: payment link URL penuh, aktifkan hanya jika kolom ini memang ada di schema
-        // paymentLinkUrl: true,
+        priceId: true,
+        // paymentLinkUrl: true, // aktifkan jika ada kolomnya di schema
       },
     });
 
-    // kirim amount sebagai number agar JSON valid saat kolomnya BigInt
-    const serialized = (plans as any[]).map(p => ({ ...p, amount: Number(p.amount) }));
+    const serialized = plans.map((p) => ({
+      ...p,
+      amount: toNumberSafe(p.amount) ?? 0,
+    }));
     res.json(serialized);
   } catch (e) {
     next(e);
@@ -87,7 +123,6 @@ r.post('/checkout', requireAuth, async (req: Request, res: Response) => {
     const { planId, employerId, customer, enabledPayments } = (req.body ?? {}) as any;
     if (!planId) return res.status(400).json({ error: 'Invalid params: planId required' });
 
-    // userId boleh kosong saat alur signup
     const maybeUserId = getMaybeUserId(req);
 
     const tx = await createSnapForPlan({
@@ -108,7 +143,7 @@ r.post('/checkout', requireAuth, async (req: Request, res: Response) => {
       token: (tx as any).token,
       redirect_url: (tx as any).redirect_url,
       orderId: (tx as any).order_id,
-      amount: plan ? Number((plan as any).amount) : undefined,
+      amount: plan ? toNumberSafe((plan as any).amount) ?? undefined : undefined,
       currency: plan?.currency ?? 'IDR',
     });
   } catch (e: any) {
@@ -130,12 +165,32 @@ r.post('/midtrans/notify', async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
 });
 
-/* ================= Detail by orderId ================= */
+/* ================= Detail by orderId (polling) ================= */
 r.get('/:orderId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const pay = await prisma.payment.findUnique({ where: { orderId: req.params.orderId } });
-    if (!pay) return res.status(404).json({ error: 'Not found' });
-    res.json(pay);
+    const p = await prisma.payment.findUnique({
+      where: { orderId: req.params.orderId },
+      select: {
+        orderId: true,
+        status: true,
+        method: true,
+        grossAmount: true,
+        currency: true,
+        createdAt: true,
+        transactionId: true,
+      },
+    });
+    if (!p) return res.status(404).json({ error: 'Not found' });
+
+    res.json({
+      orderId: p.orderId,
+      status: p.status,
+      method: p.method ?? null,
+      grossAmount: toNumberSafe(p.grossAmount) ?? 0,
+      currency: p.currency ?? 'IDR',
+      createdAt: p.createdAt?.toISOString?.() ?? new Date(p.createdAt as any).toISOString(),
+      transactionId: p.transactionId ?? null,
+    });
   } catch (e) {
     next(e);
   }

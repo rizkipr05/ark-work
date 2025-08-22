@@ -250,7 +250,8 @@
       "stats": {
         "profile": "Profil",
         "cv": "CV",
-        "skills": "Keahlian"
+        "skills": "Keahlian",
+        "completeness": "Kelengkapan Profil"
       }
     },
     "recent": {

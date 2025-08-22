@@ -11,6 +11,7 @@ import {useAuth} from '@/hooks/useAuth';
 import ArkLogo from '@/app/Images/Ungu__1_-removebg-preview.png';
 
 const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:';
+const NAV_NAME_KEY_PREFIX   = 'ark_nav_name:';   // <- sinkronisasi nama dengan ProfilePage
 
 export default function Nav() {
   const pathname = usePathname();
@@ -35,6 +36,10 @@ export default function Nav() {
 
   // avatar photo (server url / local thumb)
   const [photoURL, setPhotoURL] = useState<string | undefined>(undefined);
+
+  // >>> display name yang disinkronkan dengan localStorage <<<
+  const [displayName, setDisplayName] = useState<string>('');
+  const email = user?.email || null;
 
   // close on outside / esc
   useEffect(() => {
@@ -76,8 +81,50 @@ export default function Nav() {
     { href: '/employer/settings',       label: t('emp.settings',   { defaultMessage: 'Settings' }) },
   ]), [t]);
 
-  const displayName = user?.name?.trim() || t('user.fallback', { defaultMessage: 'User' });
-  const email = user?.email || null;
+  // ====== Sinkronisasi Display Name dengan localStorage ======
+  useEffect(() => {
+    // fallback default kalau belum ada user/mounted
+    const defaultName = t('user.fallback', { defaultMessage: 'User' });
+
+    if (!user?.email) {
+      setDisplayName(defaultName);
+      return;
+    }
+
+    const key = NAV_NAME_KEY_PREFIX + user.email;
+
+    // Seed pertama kali jika belum ada
+    let current = (localStorage.getItem(key) ?? '').trim();
+    if (!current) {
+      const seed = (user.name?.trim()) || user.email.split('@')[0] || defaultName;
+      localStorage.setItem(key, seed);
+      // beritahu komponen lain (mis. ProfilePage) kalau nama seeded
+      window.dispatchEvent(new Event('ark:name-updated'));
+      current = seed;
+    }
+    setDisplayName(current);
+
+    // Listener untuk perubahan nama dari halaman lain (ProfilePage mem-broadcast 'ark:name-updated')
+    const onNameUpdated = () => {
+      const v = (localStorage.getItem(key) ?? '').trim();
+      setDisplayName(v || (user.name?.trim() || defaultName));
+    };
+
+    // Listener storage (kalau tab lain mengubah nama)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === key) {
+        const v = (e.newValue ?? '').trim();
+        setDisplayName(v || (user.name?.trim() || defaultName));
+      }
+    };
+
+    window.addEventListener('ark:name-updated', onNameUpdated);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('ark:name-updated', onNameUpdated);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [user?.email, user?.name, t]);
 
   // load avatar
   useEffect(() => {
@@ -194,9 +241,9 @@ export default function Nav() {
                 aria-expanded={menuOpen}
                 className="flex items-center gap-2 rounded-2xl border border-neutral-200 px-2 py-1.5 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
               >
-                <Avatar src={photoURL} alt={displayName} size={32} />
+                <Avatar src={photoURL} alt={displayName || 'User'} size={32} />
                 <span className="hidden sm:block max-w-[160px] truncate text-sm font-semibold text-neutral-800 dark:text-neutral-100">
-                  {displayName}
+                  {displayName || t('user.fallback', { defaultMessage: 'User' })}
                 </span>
                 <ChevronDownIcon className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -214,9 +261,11 @@ export default function Nav() {
               >
                 <div className="px-3 py-3 border-b border-neutral-200 dark:border-neutral-800">
                   <div className="flex items-center gap-3">
-                    <Avatar src={photoURL} alt={displayName} size={40} />
+                    <Avatar src={photoURL} alt={displayName || 'User'} size={40} />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{displayName}</p>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                        {displayName || t('user.fallback', { defaultMessage: 'User' })}
+                      </p>
                       {!!email && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</p>}
                     </div>
                   </div>
@@ -350,9 +399,11 @@ export default function Nav() {
               ) : (
                 <div className="space-y-2">
                   <div className="flex items-center gap-3 rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
-                    <Avatar src={photoURL} alt={displayName} size={40} />
+                    <Avatar src={photoURL} alt={displayName || 'User'} size={40} />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{displayName}</p>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                        {displayName || t('user.fallback', { defaultMessage: 'User' })}
+                      </p>
                       {!!email && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</p>}
                     </div>
                   </div>

@@ -30,8 +30,8 @@ type Plan = {
   name: string;
   description?: string | null;
   amount: number;
-  currency: string;   // 'IDR'
-  interval: string;   // 'month' | 'year'
+  currency: string;
+  interval: string;
   active: boolean;
   priceId?: string | null;
 };
@@ -46,10 +46,10 @@ type CheckoutRes = {
 type PaymentItem = {
   id: string;
   orderId: string;
-  status: string;            // settlement | pending | cancel | expire | deny | refund | failure | capture
+  status: string;   // settlement | pending | cancel | expire | deny | refund | failure | capture
   method?: string | null;
   grossAmount: number;
-  currency: string;          // IDR
+  currency: string; // IDR
   createdAt: string;
   transactionId?: string | null;
   plan?: { id: string; slug: string; name: string; interval: string | null } | null;
@@ -78,12 +78,10 @@ export default function PaymentsCombinedPage() {
   // Load Snap.js sekali
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.snap) return; // sudah ada
-    if (!MIDTRANS_CLIENT_KEY) return; // biar ga load sia-sia saat key belum diset
-
+    if (window.snap) return;
+    if (!MIDTRANS_CLIENT_KEY) return;
     const id = 'midtrans-snap-script';
     if (document.getElementById(id)) return;
-
     const s = document.createElement('script');
     s.id = id;
     s.src = 'https://app.sandbox.midtrans.com/snap/snap.js';
@@ -148,7 +146,28 @@ function InboxPayments() {
     }
   }
 
+  // initial load + reload on status change
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+
+  // DENGARKAN SINYAL dari halaman signup untuk auto-refresh
+  useEffect(() => {
+    const onCustom = () => load(); // CustomEvent dari window
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'ark:payment:ping') load();
+    };
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('ark_payments');
+      bc.onmessage = () => load();
+    } catch {}
+    window.addEventListener('ark:payment' as any, onCustom);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('ark:payment' as any, onCustom);
+      window.removeEventListener('storage', onStorage);
+      try { bc?.close(); } catch {}
+    };
+  }, []); // eslint-disable-line
 
   return (
     <>
@@ -213,7 +232,7 @@ function InboxPayments() {
                       {p.plan?.slug || '—'} {p.plan?.interval ? `• /${p.plan.interval}` : ''}
                     </div>
                   </Td>
-                  <Td className="text-right font-semibold">{fmtIDR(p.grossAmount)}</Td>
+                    <Td className="text-right font-semibold">{fmtIDR(p.grossAmount)}</Td>
                   <Td>
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${badgeClass(p.status)}`}>
                       {p.status}
@@ -232,7 +251,9 @@ function InboxPayments() {
       </div>
 
       <div className="mt-4 flex justify-between">
-        <span className="text-xs text-slate-500">{items.length} item{items.length !== 1 ? 's' : ''}{status ? ` • status: ${status}` : ''}</span>
+        <span className="text-xs text-slate-500">
+          {items.length} item{items.length !== 1 ? 's' : ''}{status ? ` • status: ${status}` : ''}
+        </span>
         {nextCursor ? (
           <button
             onClick={() => load({ cursor: nextCursor! })}

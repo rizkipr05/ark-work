@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev": "ts-node-dev -r dotenv/config --respawn --transpile-only src/index.ts",
     "build": "tsc -p .",
-    "start": "node dist/index.js",
+    "start": "node -r dotenv/config dist/index.js",
     "prisma:generate": "prisma generate",
     "postinstall": "prisma generate",
     "prisma:studio": "prisma studio",
@@ -41,3 +41,4 @@
     "typescript": "^5.4.0"
   }
 }
+  

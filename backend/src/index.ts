@@ -12,6 +12,7 @@ import newsRouter from './routes/news';
 import chatRouter from './routes/chat';
 import adminRouter from './routes/admin';
 import { employerRouter } from './routes/employer';
+import employerAuthRouter from './routes/employer-auth'; // ✅ tambahkan ini
 import adminPlansRouter from './routes/admin-plans';
 import paymentsRouter from './routes/payments';
 
@@ -59,11 +60,17 @@ app.get('/', (_req, res) => res.send('OK'));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 /** --------------- Routes --------------- */
-app.use('/auth', authRouter);
+app.use('/auth', authRouter);                  // kandidat
 app.use('/admin', adminRouter);
 app.use('/api/news', newsRouter);
 app.use('/api/chat', chatRouter);
+
+// ✅ employer auth (signup/signin/signout/me)
+app.use('/api/employers/auth', employerAuthRouter);
+
+// employer features (step1–5, profile, dsb.)
 app.use('/api/employers', employerRouter);
+
 app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
 

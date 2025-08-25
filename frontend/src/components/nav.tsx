@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAuth } from '@/hooks/useAuth';
@@ -18,16 +18,17 @@ export default function Nav() {
   const router = useRouter();
   const { user, loading, signout } = useAuth();
 
-  if (pathname?.startsWith('/admin')) return null; // sembunyikan di /admin/*
+  // sembunyikan nav di /admin/*
+  if (pathname?.startsWith('/admin')) return null;
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // mobile + dropdown
+  // state dropdown & drawer
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // photo & display name
+  // foto & nama
   const [photoURL, setPhotoURL] = useState<string | undefined>(undefined);
   const [displayName, setDisplayName] = useState<string>('');
   const email = user?.email || null;
@@ -35,7 +36,7 @@ export default function Nav() {
   const isEmployer = user?.role === 'employer';
   const isLoggedIn = !!user;
 
-  // links
+  // links utama
   const links = useMemo(
     () => [
       { href: '/', label: t('nav.home'), icon: HomeIcon },
@@ -47,9 +48,9 @@ export default function Nav() {
     [t]
   );
 
+  // menu employer (TANPA dashboard biar tidak dobel)
   const employerLinks = useMemo(
     () => [
-      { href: '/employer', label: t('emp.dashboard', { defaultMessage: 'Employer Dashboard' }) },
       { href: '/employer/jobs/new', label: t('emp.postJob', { defaultMessage: 'Post a Job' }) },
       { href: '/employer/jobs', label: t('emp.manageJobs', { defaultMessage: 'Manage Jobs' }) },
       { href: '/employer/applications', label: t('emp.applications', { defaultMessage: 'Applications' }) },
@@ -59,27 +60,31 @@ export default function Nav() {
     [t]
   );
 
-  // sync display name
+  // sinkron nama tampil
   useEffect(() => {
     const defaultName = t('user.fallback', { defaultMessage: 'User' });
-    if (!user?.email) { setDisplayName(defaultName); return; }
+    if (!user?.email) {
+      setDisplayName(defaultName);
+      return;
+    }
     const key = NAV_NAME_KEY_PREFIX + user.email;
     let current = (localStorage.getItem(key) ?? '').trim();
     if (!current) {
-      const seed = (user.name?.trim()) || user.email.split('@')[0] || defaultName;
+      const seed = user.name?.trim() || user.email.split('@')[0] || defaultName;
       localStorage.setItem(key, seed);
       window.dispatchEvent(new Event('ark:name-updated'));
       current = seed;
     }
     setDisplayName(current);
+
     const onNameUpdated = () => {
       const v = (localStorage.getItem(key) ?? '').trim();
-      setDisplayName(v || (user.name?.trim() || defaultName));
+      setDisplayName(v || user.name?.trim() || defaultName);
     };
     const onStorage = (e: StorageEvent) => {
       if (e.key === key) {
         const v = (e.newValue ?? '').trim();
-        setDisplayName(v || (user.name?.trim() || defaultName));
+        setDisplayName(v || user.name?.trim() || defaultName);
       }
     };
     window.addEventListener('ark:name-updated', onNameUpdated);
@@ -90,23 +95,34 @@ export default function Nav() {
     };
   }, [user?.email, user?.name, t]);
 
-  // photo
+  // sinkron foto
   useEffect(() => {
-    if (!user?.email) { setPhotoURL(undefined); return; }
-    if (user?.photoUrl) { setPhotoURL(user.photoUrl); return; }
+    if (!user?.email) {
+      setPhotoURL(undefined);
+      return;
+    }
+    if (user.photoUrl) {
+      setPhotoURL(user.photoUrl);
+      return;
+    }
     const key = NAV_AVATAR_KEY_PREFIX + user.email;
     const thumb = localStorage.getItem(key);
-    if (thumb) { setPhotoURL(thumb); return; }
+    if (thumb) {
+      setPhotoURL(thumb);
+      return;
+    }
     try {
       const raw = localStorage.getItem('ark_users') || '[]';
       const arr = JSON.parse(raw) as any[];
-      const u = arr.find(x => x.email === user.email);
+      const u = arr.find((x) => x.email === user.email);
       const legacy = u?.profile?.photo?.dataUrl as string | undefined;
       setPhotoURL(legacy);
-    } catch { setPhotoURL(undefined); }
+    } catch {
+      setPhotoURL(undefined);
+    }
   }, [user?.email, user?.photoUrl]);
 
-  // react to avatar updates
+  // reaksi update avatar via storage event
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (!user?.email) return;
@@ -139,21 +155,34 @@ export default function Nav() {
     router.replace('/auth/signin');
   };
 
-  // lock scroll when drawer open
-  useEffect(() => { document.body.style.overflow = open ? 'hidden' : ''; }, [open]);
+  // kunci scroll saat drawer mobile terbuka
+  useEffect(() => {
+    document.body.style.overflow = open ? 'hidden' : '';
+  }, [open]);
 
   return (
     <nav className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200/60 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-neutral-800 dark:bg-neutral-950/60">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-2" aria-label="ArkWork Home">
-          <Image src={ArkLogo} alt="ArkWork" width={200} height={200} priority className="h-20 w-auto object-contain" />
+          <Image
+            src={ArkLogo}
+            alt="ArkWork"
+            width={200}
+            height={200}
+            priority
+            className="h-20 w-auto object-contain"
+          />
         </Link>
 
         {/* Desktop menu */}
         <div className="hidden items-center gap-1 md:flex">
-          {links.map(l => {
+          {links.map((l) => {
             const active = pathname === l.href;
-            return <NavLink key={l.href} href={l.href} active={active}>{l.label}</NavLink>;
+            return (
+              <NavLink key={l.href} href={l.href} active={active}>
+                {l.label}
+              </NavLink>
+            );
           })}
         </div>
 
@@ -162,10 +191,16 @@ export default function Nav() {
           {/* Employer quick actions */}
           {mounted && !loading && isEmployer && (
             <>
-              <Link href="/employer/jobs/new" className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              <Link
+                href="/employer/jobs/new"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
                 {t('emp.postJob', { defaultMessage: 'Post a Job' })}
               </Link>
-              <Link href="/employer/applications" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-slate-50">
+              <Link
+                href="/employer/applications"
+                className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-slate-50"
+              >
                 {t('emp.applications', { defaultMessage: 'Applications' })}
               </Link>
             </>
@@ -185,10 +220,16 @@ export default function Nav() {
             <div className="h-9 w-28 rounded-xl bg-neutral-200 animate-pulse dark:bg-neutral-800" />
           ) : !isLoggedIn ? (
             <>
-              <Link href="/auth/signin" className="inline-flex items-center rounded-xl border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+              <Link
+                href="/auth/signin"
+                className="inline-flex items-center rounded-xl border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+              >
                 {t('auth.signIn', { defaultMessage: 'Masuk' })}
               </Link>
-              <Link href="/auth/signup_perusahaan" className="inline-flex items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
+              <Link
+                href="/auth/signup_perusahaan"
+                className="inline-flex items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+              >
                 {t('auth.signUp', { defaultMessage: 'Daftar' })}
               </Link>
             </>
@@ -196,7 +237,7 @@ export default function Nav() {
             <div className="relative">
               <button
                 id="avatarBtn"
-                onClick={() => setMenuOpen(v => !v)}
+                onClick={() => setMenuOpen((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 className="flex items-center gap-2 rounded-2xl border border-neutral-200 px-2 py-1.5 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
@@ -205,7 +246,9 @@ export default function Nav() {
                 <span className="hidden sm:block max-w-[160px] truncate text-sm font-semibold text-neutral-800 dark:text-neutral-100">
                   {displayName || t('user.fallback', { defaultMessage: 'User' })}
                 </span>
-                <ChevronDownIcon className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`} />
+                <ChevronDownIcon
+                  className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`}
+                />
               </button>
 
               {/* Dropdown */}
@@ -215,8 +258,10 @@ export default function Nav() {
                 aria-hidden={!menuOpen}
                 className={[
                   'absolute right-0 mt-2 w-60 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950',
-                  menuOpen ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 -translate-y-1',
-                  'transition-all duration-150'
+                  menuOpen
+                    ? 'opacity-100 translate-y-0'
+                    : 'pointer-events-none opacity-0 -translate-y-1',
+                  'transition-all duration-150',
                 ].join(' ')}
               >
                 <div className="px-3 py-3 border-b border-neutral-200 dark:border-neutral-800">
@@ -226,27 +271,45 @@ export default function Nav() {
                       <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
                         {displayName || t('user.fallback', { defaultMessage: 'User' })}
                       </p>
-                      {!!email && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</p>}
+                      {!!email && (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                          {email}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="py-1">
                   <MenuItem href="/profile" onClick={() => setMenuOpen(false)}>
-                    <UserIcon className="h-4 w-4" /><span>{t('user.profile', { defaultMessage: 'Profile' })}</span>
-                  </MenuItem>
-                  <MenuItem href="/dashboard" onClick={() => setMenuOpen(false)}>
-                    <GridIcon className="h-4 w-4" /><span>{t('user.dashboard', { defaultMessage: 'Dashboard' })}</span>
+                    <UserIcon className="h-4 w-4" />
+                    <span>{t('user.profile', { defaultMessage: 'Profile' })}</span>
                   </MenuItem>
 
-                  {isEmployer && <>
-                    <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
-                    {employerLinks.map(i => (
-                      <MenuItem key={i.href} href={i.href} onClick={() => setMenuOpen(false)}>
-                        <span className="ml-0.5">{i.label}</span>
-                      </MenuItem>
-                    ))}
-                  </>}
+                  {/* SATU item Dashboard saja, dinamis berdasarkan role */}
+                  <MenuItem
+                    href={isEmployer ? '/employer' : '/dashboard'}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    <GridIcon className="h-4 w-4" />
+                    <span>
+                      {isEmployer
+                        ? t('emp.dashboard', { defaultMessage: 'Employer Dashboard' })
+                        : t('user.dashboard', { defaultMessage: 'Dashboard' })}
+                    </span>
+                  </MenuItem>
+
+                  {/* Menu khusus employer (tanpa dashboard) */}
+                  {isEmployer && (
+                    <>
+                      <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
+                      {employerLinks.map((i) => (
+                        <MenuItem key={i.href} href={i.href} onClick={() => setMenuOpen(false)}>
+                          <span className="ml-0.5">{i.label}</span>
+                        </MenuItem>
+                      ))}
+                    </>
+                  )}
 
                   <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
                   <button
@@ -254,7 +317,8 @@ export default function Nav() {
                     onClick={handleSignout}
                     className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-neutral-900"
                   >
-                    <LogoutIcon className="h-4 w-4" /><span>{t('user.logout', { defaultMessage: 'Sign out' })}</span>
+                    <LogoutIcon className="h-4 w-4" />
+                    <span>{t('user.logout', { defaultMessage: 'Sign out' })}</span>
                   </button>
                 </div>
               </div>
@@ -264,24 +328,53 @@ export default function Nav() {
 
         {/* Mobile trigger */}
         <button
-          onClick={() => setOpen(v => !v)}
+          onClick={() => setOpen((v) => !v)}
           className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50 active:translate-y-[1px] md:hidden dark:border-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-900"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>
-            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <path
+              d="M4 7h16M4 12h16M4 17h16"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </svg>
         </button>
       </div>
 
-      {/* Mobile drawer (ringkas) */}
-      <aside className={`fixed inset-y-0 right-0 z-[60] w-[86%] max-w-sm transform transition-transform duration-250 ease-out md:hidden ${open ? 'translate-x-0' : 'translate-x-full'}`} aria-hidden={!open} role="dialog" aria-modal="true">
+      {/* Mobile drawer */}
+      <aside
+        className={`fixed inset-y-0 right-0 z-[60] w-[86%] max-w-sm transform transition-transform duration-250 ease-out md:hidden ${
+          open ? 'translate-x-0' : 'translate-x-full'
+        }`}
+        aria-hidden={!open}
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="relative m-3 ms-auto h-[calc(100vh-1.5rem)] w-full overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-950">
           <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <div className="flex items-center gap-3">
-              <Image src={ArkLogo} alt="ArkWork" width={120} height={120} priority className="h-10 w-auto object-contain md:h-12" />
+              <Image
+                src={ArkLogo}
+                alt="ArkWork"
+                width={120}
+                height={120}
+                priority
+                className="h-10 w-auto object-contain md:h-12"
+              />
             </div>
-            <button onClick={() => setOpen(false)} className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900">
-              <svg viewBox="0 0 24 24" className="h-5 w-5"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+            <button
+              onClick={() => setOpen(false)}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5">
+                <path
+                  d="M6 6l12 12M6 18L18 6"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
           </div>
 
@@ -297,8 +390,9 @@ export default function Nav() {
                         onClick={() => setOpen(false)}
                         className={[
                           'flex items-center gap-3 rounded-xl px-3 py-3 text-[15px]',
-                          active ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-white'
-                                 : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900',
+                          active
+                            ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-white'
+                            : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900',
                         ].join(' ')}
                       >
                         <Icon className="h-5 w-5 opacity-90" />
@@ -315,10 +409,18 @@ export default function Nav() {
                 <div className="h-10 w-full rounded-xl bg-neutral-200 animate-pulse dark:bg-neutral-800" />
               ) : !isLoggedIn ? (
                 <div className="grid grid-cols-2 gap-2">
-                  <Link href="/auth/signin" onClick={() => setOpen(false)} className="rounded-xl border border-blue-600 px-3 py-2 text-center text-sm font-medium text-blue-700 hover:bg-blue-50">
+                  <Link
+                    href="/auth/signin"
+                    onClick={() => setOpen(false)}
+                    className="rounded-xl border border-blue-600 px-3 py-2 text-center text-sm font-medium text-blue-700 hover:bg-blue-50"
+                  >
                     {t('auth.signIn', { defaultMessage: 'Masuk' })}
                   </Link>
-                  <Link href="/auth/signup_perusahaan" onClick={() => setOpen(false)} className="rounded-xl bg-amber-500 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-amber-600">
+                  <Link
+                    href="/auth/signup_perusahaan"
+                    onClick={() => setOpen(false)}
+                    className="rounded-xl bg-amber-500 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-amber-600"
+                  >
                     {t('auth.signUp', { defaultMessage: 'Daftar' })}
                   </Link>
                 </div>
@@ -326,16 +428,27 @@ export default function Nav() {
                 <div className="space-y-2">
                   {isEmployer && (
                     <>
-                      <Link href="/employer/jobs/new" onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
+                      <Link
+                        href="/employer/jobs/new"
+                        onClick={() => setOpen(false)}
+                        className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                      >
                         {t('emp.postJob', { defaultMessage: 'Post a Job' })}
                       </Link>
-                      <Link href="/employer/applications" onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
+                      <Link
+                        href="/employer/applications"
+                        onClick={() => setOpen(false)}
+                        className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                      >
                         {t('emp.applications', { defaultMessage: 'Applications' })}
                       </Link>
                     </>
                   )}
                   <button
-                    onClick={async () => { await handleSignout(); setOpen(false); }}
+                    onClick={async () => {
+                      await handleSignout();
+                      setOpen(false);
+                    }}
                     className="block w-full rounded-xl border border-red-600 px-3 py-2 text-center text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white"
                   >
                     {t('user.logout', { defaultMessage: 'Sign out' })}
@@ -351,14 +464,23 @@ export default function Nav() {
 }
 
 /* ===== small pieces ===== */
-function NavLink({ href, active, children }: { href: string; active?: boolean; children: React.ReactNode }) {
+function NavLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Link
       href={href}
       className={[
         'rounded-xl px-3 py-2 text-sm transition',
-        active ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
-               : 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-900',
+        active
+          ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+          : 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-900',
       ].join(' ')}
     >
       {children}
@@ -367,31 +489,147 @@ function NavLink({ href, active, children }: { href: string; active?: boolean; c
 }
 
 function Avatar({ src, alt, size = 32 }: { src?: string; alt: string; size?: number }) {
-  if (src) return <Image src={src} alt={alt} width={size} height={size} className="h-8 w-8 rounded-full object-cover ring-1 ring-neutral-200 dark:ring-neutral-800" />;
+  if (src)
+    return (
+      <Image
+        src={src}
+        alt={alt}
+        width={size}
+        height={size}
+        className="h-8 w-8 rounded-full object-cover ring-1 ring-neutral-200 dark:ring-neutral-800"
+      />
+    );
   const initial = (alt || 'U').trim().charAt(0).toUpperCase();
   return (
-    <div aria-hidden style={{ width: size, height: size }} className="grid place-items-center rounded-full bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
+    <div
+      aria-hidden
+      style={{ width: size, height: size }}
+      className="grid place-items-center rounded-full bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+    >
       <span className="text-sm font-semibold">{initial}</span>
     </div>
   );
 }
 
-function MenuItem({ href, onClick, children }: { href: string; onClick?: () => void; children: React.ReactNode }) {
+function MenuItem({
+  href,
+  onClick,
+  children,
+}: {
+  href: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <Link role="menuitem" href={href} onClick={onClick} className="flex items-center gap-2 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
+    <Link
+      role="menuitem"
+      href={href}
+      onClick={onClick}
+      className="flex items-center gap-2 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+    >
       {children}
     </Link>
   );
 }
 
 /* ===== icons ===== */
-function HomeIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>); }
-function BriefcaseIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/></svg>); }
-function FileTextIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" stroke="currentColor" strokeWidth="2"/><path d="M14 2v6h6M8 13h8M8 17h6M8 9h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
-function NewspaperIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M7 8h10M7 12h10M7 16h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
-function InfoIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 16v-5M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
-function ChevronDownIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
-function UserIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-5 0-9 3-9 6v1h18v-1c0-3-4-6-9-6Z" stroke="currentColor" strokeWidth="2"/></svg>); }
-function GridIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z" stroke="currentColor" strokeWidth="2"/></svg>); }
-function LogoutIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M15 17l5-5-5-5M20 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M4 21h6a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H4" stroke="currentColor" strokeWidth="2"/></svg>); }
-function GlobeIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M3 12h18M12 3a12 12 0 0 0 0 18M12 3a12 12 0 0 1 0 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
+function HomeIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path
+        d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function BriefcaseIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function FileTextIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path
+        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M14 2v6h6M8 13h8M8 17h6M8 9h3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function NewspaperIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M7 8h10M7 12h10M7 16h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function InfoIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 16v-5M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function ChevronDownIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function UserIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path
+        d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-5 0-9 3-9 6v1h18v-1c0-3-4-6-9-6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+function GridIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function LogoutIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path d="M15 17l5-5-5-5M20 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 21h6a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H4" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function GlobeIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M3 12h18M12 3a12 12 0 0 0 0 18M12 3a12 12 0 0 1 0 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+  

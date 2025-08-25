@@ -11,7 +11,7 @@ import {useAuth} from '@/hooks/useAuth';
 import ArkLogo from '@/app/Images/Ungu__1_-removebg-preview.png';
 
 const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:';
-const NAV_NAME_KEY_PREFIX   = 'ark_nav_name:';   // <- sinkronisasi nama dengan ProfilePage
+const NAV_NAME_KEY_PREFIX   = 'ark_nav_name:';   // sinkronisasi nama dengan ProfilePage
 
 export default function Nav() {
   const pathname = usePathname();
@@ -20,11 +20,7 @@ export default function Nav() {
   const router = useRouter();
   const { user, loading, signout } = useAuth();
 
-  // Debug: pastikan file Nav ini yang aktif
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[Nav] mounted');
-  }, []);
+  useEffect(() => { console.log('[Nav] mounted'); }, []);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -34,10 +30,10 @@ export default function Nav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // avatar photo (server url / local thumb)
+  // avatar photo
   const [photoURL, setPhotoURL] = useState<string | undefined>(undefined);
 
-  // >>> display name yang disinkronkan dengan localStorage <<<
+  // display name sinkron dengan localStorage
   const [displayName, setDisplayName] = useState<string>('');
   const email = user?.email || null;
 
@@ -70,7 +66,7 @@ export default function Nav() {
     { href: '/about', label: t('nav.about'),    icon: InfoIcon },
   ]), [t]);
 
-  // employer awareness (tanpa ganti Nav)
+  // employer awareness (untuk quick actions saat sudah login sebagai employer)
   const isEmployer = Boolean((user as any)?.employer?.id || (user as any)?.roles?.includes?.('employer'));
   const employerLinks = useMemo(() => ([
     { href: '/employer',                label: t('emp.dashboard',  { defaultMessage: 'Employer Dashboard' }) },
@@ -83,41 +79,27 @@ export default function Nav() {
 
   // ====== Sinkronisasi Display Name dengan localStorage ======
   useEffect(() => {
-    // fallback default kalau belum ada user/mounted
     const defaultName = t('user.fallback', { defaultMessage: 'User' });
-
-    if (!user?.email) {
-      setDisplayName(defaultName);
-      return;
-    }
-
+    if (!user?.email) { setDisplayName(defaultName); return; }
     const key = NAV_NAME_KEY_PREFIX + user.email;
-
-    // Seed pertama kali jika belum ada
     let current = (localStorage.getItem(key) ?? '').trim();
     if (!current) {
       const seed = (user.name?.trim()) || user.email.split('@')[0] || defaultName;
       localStorage.setItem(key, seed);
-      // beritahu komponen lain (mis. ProfilePage) kalau nama seeded
       window.dispatchEvent(new Event('ark:name-updated'));
       current = seed;
     }
     setDisplayName(current);
-
-    // Listener untuk perubahan nama dari halaman lain (ProfilePage mem-broadcast 'ark:name-updated')
     const onNameUpdated = () => {
       const v = (localStorage.getItem(key) ?? '').trim();
       setDisplayName(v || (user.name?.trim() || defaultName));
     };
-
-    // Listener storage (kalau tab lain mengubah nama)
     const onStorage = (e: StorageEvent) => {
       if (e.key === key) {
         const v = (e.newValue ?? '').trim();
         setDisplayName(v || (user.name?.trim() || defaultName));
       }
     };
-
     window.addEventListener('ark:name-updated', onNameUpdated);
     window.addEventListener('storage', onStorage);
     return () => {
@@ -130,11 +112,9 @@ export default function Nav() {
   useEffect(() => {
     if (!user?.email) { setPhotoURL(undefined); return; }
     if ((user as any)?.photoUrl) { setPhotoURL((user as any).photoUrl); return; }
-
     const key = NAV_AVATAR_KEY_PREFIX + user.email;
     const thumb = localStorage.getItem(key);
     if (thumb) { setPhotoURL(thumb); return; }
-
     try {
       const raw = localStorage.getItem('ark_users') || '[]';
       const arr = JSON.parse(raw) as any[];
@@ -199,7 +179,7 @@ export default function Nav() {
 
         {/* Right side (desktop) */}
         <div className="hidden items-center gap-3 md:flex">
-          {/* Employer quick actions */}
+          {/* Employer quick actions (only when user employer) */}
           {mounted && !loading && isEmployer && (
             <>
               <Link href="/employer/jobs/new" className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
@@ -225,11 +205,12 @@ export default function Nav() {
             <div className="h-9 w-28 rounded-xl bg-neutral-200 animate-pulse dark:bg-neutral-800" />
           ) : !user ? (
             <>
+              {/* HANYA 2 tombol: Masuk & Daftar. Employer login juga lewat /auth/signin */}
               <Link href="/auth/signin" className="inline-flex items-center rounded-xl border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
-                {t('auth.signIn', { defaultMessage: 'Sign in' })}
+                {t('auth.signIn', { defaultMessage: 'Masuk' })}
               </Link>
               <Link href="/auth/signup_perusahaan" className="inline-flex items-center rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
-                {t('auth.signUp', { defaultMessage: 'Sign up' })}
+                {t('auth.signUp', { defaultMessage: 'Daftar' })}
               </Link>
             </>
           ) : (
@@ -248,7 +229,7 @@ export default function Nav() {
                 <ChevronDownIcon className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* Dropdown */}
+              {/* Dropdown User */}
               <div
                 id="avatarMenu"
                 role="menu"
@@ -316,30 +297,16 @@ export default function Nav() {
       </div>
 
       {/* Overlay */}
-      <div
-        onClick={() => setOpen(false)}
-        className={`fixed inset-0 z-[55] bg-black/40 backdrop-blur-[1px] transition-opacity duration-200 md:hidden ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-        aria-hidden={!open}
-      />
+      <div onClick={() => setOpen(false)} className={`fixed inset-0 z-[55] bg-black/40 backdrop-blur-[1px] transition-opacity duration-200 md:hidden ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`} aria-hidden={!open} />
 
       {/* Mobile drawer */}
-      <aside
-        id="mobileMenu"
-        className={`fixed inset-y-0 right-0 z-[60] w-[86%] max-w-sm transform transition-transform duration-250 ease-out md:hidden ${open ? 'translate-x-0' : 'translate-x-full'}`}
-        aria-hidden={!open}
-        role="dialog"
-        aria-modal="true"
-      >
+      <aside id="mobileMenu" className={`fixed inset-y-0 right-0 z-[60] w-[86%] max-w-sm transform transition-transform duration-250 ease-out md:hidden ${open ? 'translate-x-0' : 'translate-x-full'}`} aria-hidden={!open} role="dialog" aria-modal="true">
         <div className="relative m-3 ms-auto h-[calc(100vh-1.5rem)] w-full overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-950">
           <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <div className="flex items-center gap-3">
               <Image src={ArkLogo} alt="ArkWork" width={120} height={120} priority className="h-10 w-auto object-contain md:h-12" />
             </div>
-            <button
-              onClick={() => setOpen(false)}
-              aria-label={t('menu.close', { defaultMessage: 'Close menu' })}
-              className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
-            >
+            <button onClick={() => setOpen(false)} aria-label={t('menu.close', { defaultMessage: 'Close menu' })} className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900">
               <svg viewBox="0 0 24 24" className="h-5 w-5"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
             </button>
           </div>
@@ -351,15 +318,7 @@ export default function Nav() {
                   const active = pathname === href;
                   return (
                     <li key={href}>
-                      <Link
-                        href={href}
-                        onClick={() => setOpen(false)}
-                        className={[
-                          'flex items-center gap-3 rounded-xl px-3 py-3 text-[15px]',
-                          active ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-white'
-                                 : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900',
-                        ].join(' ')}
-                      >
+                      <Link href={href} onClick={() => setOpen(false)} className={['flex items-center gap-3 rounded-xl px-3 py-3 text-[15px]', active ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-white' : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900'].join(' ')}>
                         <Icon className="h-5 w-5 opacity-90" />
                         <span>{label}</span>
                       </Link>
@@ -368,32 +327,18 @@ export default function Nav() {
                 })}
               </ul>
 
-              {/* employer section (mobile) */}
-              {mounted && !loading && isEmployer && (
-                <>
-                  <hr className="my-4 border-neutral-200 dark:border-neutral-800" />
-                  <p className="px-2 pb-2 text-xs uppercase tracking-wide text-neutral-500">Employer</p>
-                  <ul className="space-y-1">
-                    {employerLinks.map(i => (
-                      <li key={i.href}>
-                        <Link href={i.href} onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">{i.label}</Link>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-
               <hr className="my-4 border-neutral-200 dark:border-neutral-800" />
 
               {!mounted || loading ? (
                 <div className="h-10 w-full rounded-xl bg-neutral-200 animate-pulse dark:bg-neutral-800" />
               ) : !user ? (
                 <div className="grid grid-cols-2 gap-2">
+                  {/* Mobile: Masuk & Daftar saja (Employer login lewat /auth/signin juga) */}
                   <Link href="/auth/signin" onClick={() => setOpen(false)} className="rounded-xl border border-blue-600 px-3 py-2 text-center text-sm font-medium text-blue-700 hover:bg-blue-50">
-                    {t('auth.signIn', { defaultMessage: 'Sign in' })}
+                    {t('auth.signIn', { defaultMessage: 'Masuk' })}
                   </Link>
                   <Link href="/auth/signup_perusahaan" onClick={() => setOpen(false)} className="rounded-xl bg-amber-500 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-amber-600">
-                    {t('auth.signUp', { defaultMessage: 'Sign up' })}
+                    {t('auth.signUp', { defaultMessage: 'Daftar' })}
                   </Link>
                 </div>
               ) : (
@@ -401,9 +346,7 @@ export default function Nav() {
                   <div className="flex items-center gap-3 rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
                     <Avatar src={photoURL} alt={displayName || 'User'} size={40} />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
-                        {displayName || t('user.fallback', { defaultMessage: 'User' })}
-                      </p>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{displayName || t('user.fallback', { defaultMessage: 'User' })}</p>
                       {!!email && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</p>}
                     </div>
                   </div>
@@ -413,10 +356,7 @@ export default function Nav() {
                   <Link href="/dashboard" onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
                     {t('user.dashboard', { defaultMessage: 'Dashboard' })}
                   </Link>
-                  <button
-                    onClick={async () => { await handleSignout(); setOpen(false); }}
-                    className="block w-full rounded-xl border border-red-600 px-3 py-2 text-center text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white"
-                  >
+                  <button onClick={async () => { await handleSignout(); setOpen(false); }} className="block w-full rounded-xl border border-red-600 px-3 py-2 text-center text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white">
                     {t('user.logout', { defaultMessage: 'Sign out' })}
                   </button>
                 </div>
@@ -440,7 +380,7 @@ export default function Nav() {
   );
 }
 
-/* ====== small pieces ====== */
+/* ===== small pieces ===== */
 function NavLink({ href, active, children }: { href: string; active?: boolean; children: React.ReactNode }) {
   return (
     <Link
@@ -465,6 +405,7 @@ function Avatar({ src, alt, size = 32 }: { src?: string; alt: string; size?: num
     </div>
   );
 }
+
 function MenuItem({ href, onClick, children }: { href: string; onClick?: () => void; children: React.ReactNode }) {
   return (
     <Link role="menuitem" href={href} onClick={onClick} className="flex items-center gap-2 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
@@ -473,7 +414,7 @@ function MenuItem({ href, onClick, children }: { href: string; onClick?: () => v
   );
 }
 
-/* ====== icons ====== */
+/* ===== icons ===== */
 function HomeIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>); }
 function BriefcaseIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/></svg>); }
 function FileTextIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" stroke="currentColor" strokeWidth="2"/><path d="M14 2v6h6M8 13h8M8 17h6M8 9h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }

@@ -66,9 +66,17 @@
   },
   "user": {
     "profile": "Profil",
-    "dashboard": "Dasbord",
+    "dashboard": "Dasbor",
     "logout": "Keluar",
     "fallback": "Pengguna"
+  },
+  "emp": {
+    "dashboard": "Dasbor Perusahaan",
+    "postJob": "Pasang Lowongan",
+    "manageJobs": "Kelola Lowongan",
+    "applications": "Lamaran Masuk",
+    "billing": "Tagihan",
+    "settings": "Pengaturan"
   },
   "cta": {
     "energy": "Jelajahi Update Energi"

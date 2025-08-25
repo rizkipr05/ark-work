@@ -1,4 +1,4 @@
-  'use client';
+'use client';
 
   import {
     useMemo,
@@ -13,6 +13,7 @@
   import Image from 'next/image';
   import { useTranslations } from 'next-intl';
   import Logo from '@/app/Images/Ungu__1_-removebg-preview.png';
+  import { useAuth } from '@/hooks/useAuth'; // Tambahkan import ini
 
   /* --------------------------------- Config --------------------------------- */
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000';
@@ -215,6 +216,7 @@
   export default function Page() {
     const t = useTranslations('companySignup');
     const router = useRouter();
+    const { signinEmployer } = useAuth(); // Tambahkan ini
 
     const [mode, setMode] = useState<Mode>('signin');
     const [error, setError] = useState<string | null>(null);
@@ -233,13 +235,8 @@
         setSiBusy(true);
         setError(null);
 
-        // backend admin.ts memakai usernameOrEmail
-        await apiPost('/api/employers/auth/signin', {
-          usernameOrEmail: siEmail.trim(),
-          password: siPw,
-        });
-
-        router.push('/employer');
+        await signinEmployer(siEmail.trim(), siPw); // ← pakai context, state user langsung terisi
+        router.replace('/employer');
         router.refresh();
       } catch (err: any) {
         setError(err?.message || 'Email atau password salah');

@@ -1,6 +1,5 @@
 {
-
-  "signupperushaan":{},
+  "signupperushaan": {},
   "companySignup": {
     "title": "Create Company Account",
     "subtitle": "Manage your job posts and hire top talent on ArkWork.",
@@ -52,9 +51,7 @@
     }
   },
 
-  "Halaman-home": {}, 
-
-
+  "Halaman-home": {},
 
   "nav": {
     "home": "Home",
@@ -70,12 +67,21 @@
   "user": {
     "profile": "Profile",
     "dashboard": "Dashboard",
-    "logout": "Logout",
+    "logout": "Sign out",
     "fallback": "User"
+  },
+  "emp": {
+    "dashboard": "Employer Dashboard",
+    "postJob": "Post a Job",
+    "manageJobs": "Manage Jobs",
+    "applications": "Applications",
+    "billing": "Billing",
+    "settings": "Settings"
   },
   "cta": {
     "energy": "Explore Energy Updates"
   },
+
   "home": {
     "hero": {
       "title": { "1": "Power Your Career in the", "2": "Energy Sector" },
@@ -96,7 +102,6 @@
       "desc": "From job search to industry insights, ArkWork gives you complete tools to grow in the energy sector."
     },
     "feature": {
-        
       "1": { "title": "Smart Job Search", "desc": "Find energy jobs with AI matching and advanced filters." },
       "2": { "title": "Company Profiles", "desc": "Explore companies and learn about their culture & opportunities." },
       "3": { "title": "Talent Matching", "desc": "Get matched to roles based on your skills and experience." },
@@ -111,6 +116,7 @@
       "note": "No credit card required • Sign up takes less than 1 minute"
     }
   },
+
   "lang": { "switch": "Switch language" },
   "menu": { "open": "Open menu", "close": "Close menu", "user": "Open user menu" },
 
@@ -133,8 +139,7 @@
     "madeFor": "Made for the energy & oil & gas community."
   },
 
-  
-    "Halaman-about": {},
+  "Halaman-about": {},
 
   "about": {
     "title": "About",
@@ -168,9 +173,7 @@
     }
   },
 
-
-
-  "Halaman-sigin": {},
+  "Halaman-signin": {},
 
   "signin": {
     "title": "Sign in to ArkWork",
@@ -193,8 +196,6 @@
       "google": "Failed to sign in with Google."
     }
   },
-
-
 
   "Halaman-signup": {},
 
@@ -239,25 +240,34 @@
     }
   },
 
-
   "Halaman-dashboard": {},
 
   "dashboard": {
     "greeting": "Hi, {name}!",
+    "greetingSmall": "Welcome back",
+    "hero": { "subtitle": "See your recent activity and complete your profile for better job suggestions." },
+    "cta": { "findJobs": "Find Jobs" },
     "fallback": { "there": "there", "job": "Job" },
     "profile": {
       "title": "My Profile",
       "desc": "Complete your profile to get better job recommendations",
-      "cta": "Edit Profile"
+      "cta": "Edit Profile",
+      "badge": "Better recommendations",
+      "stats": {
+        "profile": "Profile",
+        "cv": "CV",
+        "skills": "Skills",
+        "completeness": "Profile completeness"
+      }
     },
     "recent": {
       "title": "Recent Activity",
       "empty": "No activity yet",
       "item": "Applied to {title} — {date}",
-      "viewAll": "View All"
+      "viewAll": "View All",
+      "cta": { "findJobs": "Find Jobs" }
     }
   },
-
 
   "Halaman-jobs": {},
 
@@ -304,7 +314,7 @@
     }
   },
 
-  "Halaman-newa": {},
+  "Halaman-news": {},
 
   "news": {
     "title": "Energy & Oil & Gas News",
@@ -312,7 +322,6 @@
     "readMore": "Read More",
     "empty": "No articles found.",
     "error": { "load": "Failed to load news" },
-
     "scope": {
       "id": "Scope: Indonesia",
       "global": "Scope: Global",
@@ -321,7 +330,6 @@
     "lang": { "id": "Lang: ID", "en": "Lang: EN" },
     "country": { "id": "Country: ID", "us": "Country: US" },
     "limit": { "n": "Limit: {n}" },
-
     "keywords": { "placeholder": "Custom keywords (optional)" },
     "btn": { "fetch": "Fetch News", "loading": "Loading…" },
     "quick": { "placeholder": "Quick filter by title/source…", "clear": "Clear Filter" },
@@ -348,12 +356,25 @@
     },
     "actions": {
       "save": "Save Profile",
-      "download": "Download"
+      "download": "Download",
+      "view": "View",
+      "remove": "Remove",
+      "chooseFile": "Choose File",
+      "changePhoto": "Change Photo",
+      "uploading": "Uploading..."
+    },
+    "hints": {
+      "docPreview": "Inline preview is only for PDF. DOC/DOCX will open/download in a new tab.",
+      "noCvYet": "No CV uploaded yet."
     },
     "toast": {
       "saved": "Profile updated!",
       "notFound": "User not found in local data.",
-      "failed": "Failed to save profile."
+      "failed": "Failed to save profile.",
+      "cvUploaded": "CV uploaded successfully.",
+      "cvRemoved": "CV removed.",
+      "cvTypeNotAllowed": "File must be PDF/DOC/DOCX.",
+      "cvTooLarge": "Maximum size {size}MB"
     }
   },
 
@@ -427,9 +448,4 @@
     "results": "{count} results",
     "participate": { "alert": "Interested to participate: {title}\nPlease upload your documents in the next step." }
   }
-
-
-
-  
-
 }

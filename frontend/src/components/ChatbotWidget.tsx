@@ -50,7 +50,6 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [intent, setIntent] = useState<'news' | 'jobs' | 'consult'>('news');
   const [profile, setProfile] = useState<Profile>({});
   const [showProfile, setShowProfile] = useState(false);
 
@@ -84,22 +83,24 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [msgs, open, busy]);
 
-  /* ---------- prompt suggestions ---------- */
-  const suggestions = useMemo(() => {
-    if (intent === 'jobs')
-      return [
-        'Rekomendasikan role migas untuk operator kilang 2 tahun di Balikpapan',
-        'Skill apa agar masuk tim HSE di LNG?',
-        'Sertifikasi wajib untuk field engineer?',
-      ];
-    if (intent === 'consult')
-      return [
-        'Saya ingin pindah dari operator ke planner—langkahnya?',
-        'Bikin roadmap 90 hari belajar analytics produksi',
-        'Bagaimana persiapan wawancara teknis kilang?',
-      ];
-    return ['Ringkas berita migas hari ini', 'Apa itu upstream & downstream?', 'Berita LNG Indonesia terbaru'];
-  }, [intent]);
+  /* ---------- prompt suggestions (gabungan) ---------- */
+  const suggestions = useMemo(
+    () => [
+      // News
+      'Ringkas berita migas hari ini',
+      'Berita LNG Indonesia terbaru',
+      // Jobs (jobseeker)
+      'Rekomendasikan role migas untuk operator kilang 2 tahun di Balikpapan',
+      'Skill apa agar masuk tim HSE di LNG?',
+      // Consult
+      'Saya ingin pindah dari operator ke planner—langkahnya?',
+      'Bikin roadmap 90 hari belajar analytics produksi',
+      // Employer
+      'Bikinkan JD Production Engineer (mid, Jakarta) + scorecard',
+      'Susun alur rekrutmen 3 tahap + SLA & email template',
+    ],
+    []
+  );
 
   /* ---------- ask API ---------- */
   async function ask(text: string) {
@@ -114,7 +115,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          intent,
+          // Tidak kirim intent: backend akan auto-infer
           profile,
           messages: [
             ...msgs.map(({ role, text }) => ({ role, content: text })),
@@ -184,7 +185,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
               <div className="h-8 w-8 rounded-xl bg-black grid place-items-center text-white font-bold text-xs">AW</div>
               <div>
                 <div className="font-semibold text-neutral-900">ArkWork Agent</div>
-                <div className="text-xs text-neutral-500">Berita • Kerja • Konsultasi</div>
+                <div className="text-xs text-neutral-500">Berita • Kerja • Konsultasi • Employer</div>
               </div>
             </div>
 
@@ -213,30 +214,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
             </div>
           </div>
 
-          {/* Mode chips */}
-          <div className="px-3 py-2 flex gap-2 border-b border-neutral-200 bg-gray-50">
-            {[
-              { k: 'news', label: 'Berita' },
-              { k: 'jobs', label: 'Kerja' },
-              { k: 'consult', label: 'Konsultasi' },
-            ].map((m) => {
-              const active = intent === (m.k as any);
-              return (
-                <button
-                  key={m.k}
-                  onClick={() => setIntent(m.k as any)}
-                  className={[
-                    'px-3 py-1.5 rounded-full text-xs border transition',
-                    active ? 'bg-black text-white border-black' : 'border-neutral-300 hover:bg-neutral-200',
-                  ].join(' ')}
-                >
-                  {m.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Messages */}
+          {/* Messages + Suggestions */}
           <div ref={listRef} className="max-h-[50vh] overflow-y-auto px-3 py-3 space-y-2">
             {msgs.length === 0 ? (
               <div className="rounded-xl border border-dashed border-neutral-300 p-4 text-sm text-neutral-600">
@@ -318,13 +296,7 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={
-                  intent === 'jobs'
-                    ? 'Tanya role/skills/sertifikasi…'
-                    : intent === 'consult'
-                    ? 'Ceritakan situasi/tujuanmu…'
-                    : 'Tanya berita/konteks migas…'
-                }
+                placeholder="Tanya berita migas, minta JD, rekomendasi kerja, atau konsultasi…"
                 className="flex-1 rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-400"
               />
               <button

@@ -34,17 +34,17 @@ function toGeminiHistory(messages: MsgIn[]) {
 function buildSystemPrompt(intent: string, profile?: Profile) {
   const base = `
 Kamu adalah **ArkWork Agent**, asisten situs ArkWork.
-Jawablah dalam **Bahasa Indonesia** yang jelas, ringkas, dan ramah profesional.
-Fokus: industri migas (oil & gas) Indonesia & global, LNG, utilities, dan karier terkait energi.
+Jawablah dalam **Bahasa Indonesia** yang jelas, ringkas, profesional.
+Fokus: migas (oil & gas), LNG, utilities, serta **karier & rekrutmen**.
 
 **Aturan umum (WAJIB):**
-- Jawab dalam **Markdown** yang terstruktur (heading, bullet/numbered list, tabel bila cocok).
-- Jika jawaban panjang, **mulai dengan TL;DR** (1–2 kalimat ringkas).
-- Sertakan **langkah praktis** (step-by-step), checklist, dan contoh konkret.
-- Jangan mengarang angka/fakta real-time jika tidak yakin.
-- Untuk saran karier/konsultasi: berikan **alasan**, **alternatif**, dan **risiko** singkat.
+- Jawab dalam **Markdown** terstruktur (heading, bullet/numbered list, tabel bila cocok).
+- Jika jawaban panjang, **mulai dengan TL;DR** (1–2 kalimat).
+- Beri **langkah praktis** (step-by-step), checklist, contoh konkret.
+- Jangan mengarang angka/fakta real-time; sebutkan asumsi bila perlu.
+- Untuk karier/konsultasi: jelaskan **alasan**, **alternatif**, dan **risiko** singkat.
 - Hindari klaim medis/keuangan/hukum spesifik; beri disclaimer ringan & sarankan ahli bila perlu.
-- Jika menyebut sumber, **jangan buat tautan palsu**; cukup tulis nama sumber/keyword yang bisa dicari.
+- Saat menyebut sumber, **tanpa link palsu**; cukup nama sumber/keyword yang bisa dicari.
 
 **Profil pengguna (opsional):**
 ${profile ? JSON.stringify(profile, null, 2) : "(tidak ada profil)"}  
@@ -54,10 +54,10 @@ ${profile ? JSON.stringify(profile, null, 2) : "(tidak ada profil)"}
     news: `
 Mode: **Berita**
 - Ringkas padat + poin penting + konteks singkat.
-- Boleh sarankan keyword yang bisa dicari di halaman O&G Monitor.
+- Boleh sarankan keyword pencarian di O&G Monitor.
 `,
     jobs: `
-Mode: **Rekomendasi Kerja**
+Mode: **Rekomendasi Kerja (Jobseeker)**
 - Beri: role target, alasan cocok, skill gap, sertifikasi opsional, contoh keyword lowongan, rencana 30/60/90 hari (list).
 - Jika profil minim, tanyakan 1–2 klarifikasi singkat.
 `,
@@ -65,15 +65,52 @@ Mode: **Rekomendasi Kerja**
 Mode: **Konsultasi**
 - Struktur: *Masalah → Opsi & trade-off → Rencana aksi (bullet) → Risiko → Next steps (3–5 butir)*.
 `,
+    employer: `
+Mode: **Employer (Perusahaan)**
+- Bantu kebutuhan rekrutmen end-to-end:
+  - **Job Description** (template siap salin: ringkasan, tanggung jawab, kualifikasi, nice-to-have, benefit).
+  - **Screening criteria & scorecard** (w/ bobot sederhana), **pertanyaan interview** (teknis & behavioral).
+  - **Rencana proses** (SLA, tahap, stakeholder), **email templates** (invitation, rejection, offer).
+  - **Posting tips** (judul yang marketable, kata kunci, kanal distribusi).
+  - **Kepatuhan & etika** (hindari diskriminasi, privasi kandidat).
+- Jika info kurang (lokasi, seniority, range gaji, tipe kontrak): ajukan **1–2 klarifikasi singkat**.
+- Outputkan bagian-bagian dalam sub-heading dan checklist agar mudah dipakai.
+`,
   };
 
   const mode = modes[intent] || modes.news;
-  return (
-    base +
-    "\n" +
-    mode +
-    "\nBalas dalam **Markdown**, ringkas, to the point, dan mudah dieksekusi."
-  );
+  return base + "\n" + mode + "\nBalas dalam **Markdown**, ringkas, to the point, dan mudah dieksekusi.";
+}
+
+/** Heuristik ringan untuk auto-deteksi intent bila tidak dikirim oleh client */
+function inferIntent(text: string, fallback: string): "news" | "jobs" | "consult" | "employer" {
+  const q = (text || "").toLowerCase();
+
+  // employer keywords
+  const employerKws = [
+    "employer", "perusahaan", "rekrut", "rekrutmen", "hr", "talent", "kandidat",
+    "lowongan", "post job", "posting job", "job posting",
+    "jd", "job description", "deskripsi pekerjaan",
+    "screening", "scorecard", "wawancara", "interview",
+    "template email", "offer", "rejection", "kontrak", "salary", "gaji", "benefit",
+    "pipeline", "ats", "lamaran", "pelamar", "shortlist"
+  ];
+  if (employerKws.some(k => q.includes(k))) return "employer";
+
+  // jobs (jobseeker) keywords
+  const jobsKws = [
+    "lamar", "apply", "cv", "resume", "portofolio", "skill",
+    "sertifikasi", "career", "karier", "rekomendasi role",
+    "fresh graduate", "magang", "intern", "interview tips"
+  ];
+  if (jobsKws.some(k => q.includes(k))) return "jobs";
+
+  // consult keywords
+  const consultKws = ["konsultasi", "masalah", "roadmap", "langkah", "rencana", "strategy", "strategi"];
+  if (consultKws.some(k => q.includes(k))) return "consult";
+
+  // news default
+  return (fallback as any) || "news";
 }
 
 router.post("/", async (req: Request, res: Response) => {
@@ -81,13 +118,14 @@ router.post("/", async (req: Request, res: Response) => {
     const body = req.body ?? {};
     const messages = (body.messages ?? []) as MsgIn[];
     const user = messages[messages.length - 1]?.content || "";
-    const intent: string = body.intent || "news";
+    const clientIntent: string = body.intent || "news";
+    const intent = inferIntent(user, clientIntent);
     const profile: Profile | undefined = body.profile;
 
     if (!user?.trim()) {
       return res.json({
         answer:
-          "Halo! Saya ArkWork Agent. Saya bisa bantu ringkas berita migas, rekomendasi kerja, dan konsultasi langkah praktis. Coba: **Rekomendasikan role untuk operator kilang dengan pengalaman 2 tahun di Balikpapan.**",
+          "Halo! Saya ArkWork Agent. Saya bisa bantu **berita migas**, **rekomendasi kerja**, **konsultasi**, dan **kebutuhan employer** (JD, screening, email template, dsb). Coba: **“Bikinkan JD Production Engineer level mid di Jakarta + scorecard penilaian.”**",
       });
     }
 

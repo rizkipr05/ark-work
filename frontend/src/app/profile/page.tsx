@@ -14,7 +14,7 @@ type StoredUser = {
   email: string;
   name?: string;
   profile?: {
-    location?: string;          // <- sekarang dari dropdown
+    location?: string;          // <- sekarang string gabungan dari WilayahSelect
     phone?: string;
     skills?: string;            // <- CSV dari multi-select
     cv?: CvMeta;
@@ -34,49 +34,6 @@ const ALLOWED_CV_TYPES = [
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-];
-
-/** ====== Opsi Filter (Indonesia + O&G) ====== */
-const LOCATION_OPTIONS = [
-  'Aceh',
-  'Sumatera Utara',
-  'Sumatera Barat',
-  'Riau',
-  'Kepulauan Riau',
-  'Jambi',
-  'Sumatera Selatan',
-  'Kepulauan Bangka Belitung',
-  'Bengkulu',
-  'Lampung',
-  'DKI Jakarta',
-  'Jawa Barat',
-  'Banten',
-  'Jawa Tengah',
-  'DI Yogyakarta',
-  'Jawa Timur',
-  'Bali',
-  'Nusa Tenggara Barat',
-  'Nusa Tenggara Timur',
-  'Kalimantan Barat',
-  'Kalimantan Tengah',
-  'Kalimantan Selatan',
-  'Kalimantan Timur',
-  'Kalimantan Utara',
-  'Sulawesi Utara',
-  'Sulawesi Tengah',
-  'Sulawesi Selatan',
-  'Sulawesi Tenggara',
-  'Gorontalo',
-  'Sulawesi Barat',
-  'Maluku',
-  'Maluku Utara',
-  'Papua',
-  'Papua Barat',
-  'Papua Barat Daya',
-  'Papua Selatan',
-  'Papua Tengah',
-  'Papua Pegunungan',
-  'Remote',
 ];
 
 const SKILL_OPTIONS = [
@@ -215,9 +172,6 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
     />
   );
 }
-function Pill({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-full bg-neutral-900 px-2 py-1 text-xs text-white">{children}</span>;
-}
 type Toast = { type: 'success' | 'error' | 'info'; message: string } | null;
 function ToastBanner({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   if (!toast) return null;
@@ -259,6 +213,168 @@ async function fileToThumbDataURL(file: File | Blob, maxSize = 160): Promise<str
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
+/** ================== Wilayah Select (Prov → Kab/Kota → Kec) ================== */
+type Opt = { id: string; name: string };
+function WilayahSelect({
+  value,
+  onChange,
+  labelProv = 'Provinsi',
+  labelKab = 'Kabupaten/Kota',
+  labelKec = 'Kecamatan',
+}: {
+  value: string; // string gabungan yang disimpan di profil
+  onChange: (v: string) => void;
+  labelProv?: string;
+  labelKab?: string;
+  labelKec?: string;
+}) {
+  const [provinces, setProvinces] = useState<Opt[]>([]);
+  const [regencies, setRegencies] = useState<Opt[]>([]);
+  const [districts, setDistricts] = useState<Opt[]>([]);
+
+  const [prov, setProv] = useState<Opt | null>(null);
+  const [kab, setKab] = useState<Opt | null>(null);
+  const [kec, setKec] = useState<Opt | null>(null);
+
+  // Ambil provinsi
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/wilayah/provinces');
+        const data = await r.json();
+        setProvinces(data.items || []);
+      } catch {
+        setProvinces([]);
+      }
+    })();
+  }, []);
+
+  // Jika provinsi berubah -> ambil kabupaten
+  useEffect(() => {
+    if (!prov) { setRegencies([]); setKab(null); setDistricts([]); setKec(null); return; }
+    (async () => {
+      try {
+        const r = await fetch(`/api/wilayah/regencies/${prov.id}`);
+        const data = await r.json();
+        setRegencies(data.items || []);
+        setKab(null);
+        setDistricts([]);
+        setKec(null);
+      } catch {
+        setRegencies([]); setKab(null);
+      }
+    })();
+  }, [prov?.id]);
+
+  // Jika kabupaten berubah -> ambil kecamatan
+  useEffect(() => {
+    if (!kab) { setDistricts([]); setKec(null); return; }
+    (async () => {
+      try {
+        const r = await fetch(`/api/wilayah/districts/${kab.id}`);
+        const data = await r.json();
+        setDistricts(data.items || []);
+        setKec(null);
+      } catch {
+        setDistricts([]); setKec(null);
+      }
+    })();
+  }, [kab?.id]);
+
+  // Gabungkan nilai untuk disimpan di profil
+  useEffect(() => {
+    const parts = [kec?.name, kab?.name, prov?.name].filter(Boolean);
+    onChange(parts.join(', ')); // contoh: "Cilandak, Jakarta Selatan, DKI Jakarta"
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prov, kab, kec]);
+
+  const Select = ({
+    value,
+    setValue,
+    options,
+    placeholder,
+    disabled
+  }: {
+    value: Opt | null;
+    setValue: (o: Opt | null) => void;
+    options: Opt[];
+    placeholder: string;
+    disabled?: boolean;
+  }) => (
+    <div className="relative">
+      <select
+        value={value?.id || ''}
+        onChange={(e) => {
+          const val = e.target.value;
+          const o = options.find((x) => x.id === val) || null;
+          setValue(o);
+        }}
+        disabled={disabled}
+        className="w-full appearance-none rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 pr-10 text-sm outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>{o.name}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">▾</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <span className="mb-1 block text-sm text-neutral-700">{labelProv}</span>
+          <Select
+            value={prov}
+            setValue={(o)=>{ setProv(o); }}
+            options={provinces}
+            placeholder="Pilih provinsi…"
+          />
+        </div>
+        <div>
+          <span className="mb-1 block text-sm text-neutral-700">{labelKab}</span>
+          <Select
+            value={kab}
+            setValue={(o)=>{ setKab(o); }}
+            options={regencies}
+            placeholder="Pilih kab/kota…"
+            disabled={!prov}
+          />
+        </div>
+        <div>
+          <span className="mb-1 block text-sm text-neutral-700">{labelKec}</span>
+          <Select
+            value={kec}
+            setValue={(o)=>{ setKec(o); }}
+            options={districts}
+            placeholder="Pilih kecamatan…"
+            disabled={!kab}
+          />
+        </div>
+      </div>
+
+      {value && (
+        <div className="text-xs text-neutral-600">
+          Dipilih: <span className="font-medium">{value}</span>
+        </div>
+      )}
+
+      {/* Shortcut pilih Remote */}
+      <div>
+        <button
+          type="button"
+          onClick={() => { setProv(null); setKab(null); setKec(null); onChange('Remote'); }}
+          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+        >
+          Pilih “Remote”
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** ================== Page ================== */
 export default function ProfilePage() {
   const t = useTranslations('profile');
@@ -269,7 +385,7 @@ export default function ProfilePage() {
   const notSignedIn = !email;
 
   const [name, setName] = useState('');
-  const [location, setLocation] = useState(''); // dropdown value
+  const [location, setLocation] = useState(''); // string gabungan dari WilayahSelect
   const [phone, setPhone] = useState('');
   const [skillTags, setSkillTags] = useState<string[]>([]); // multi-select
 
@@ -319,17 +435,6 @@ export default function ProfilePage() {
     setCvMeta(u?.profile?.cv ?? null);
     setAvatarMeta(u?.profile?.photo ?? null);
   }, [email]);
-
-  // dengarkan perubahan nama dari navbar (dua arah)
-  useEffect(() => {
-    if (!email) return;
-    const onNavName = () => {
-      const latest = getNavName(email);
-      if (latest && latest !== name) setName(latest);
-    };
-    window.addEventListener('ark:name-updated', onNavName);
-    return () => window.removeEventListener('ark:name-updated', onNavName);
-  }, [email, name]);
 
   // objectURL CV
   useEffect(() => {
@@ -591,26 +696,10 @@ export default function ProfilePage() {
               <Input readOnly value={email ?? ''} className="bg-neutral-100" />
             </div>
 
-            {/* Lokasi: Single Select */}
-            <div className="md:col-span-1">
+            {/* Lokasi: pakai API Wilayah */}
+            <div className="md:col-span-2">
               <Label>{t('fields.location') || 'Lokasi'}</Label>
-              <div className="relative">
-                <select
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 pr-10 text-sm text-neutral-900 outline-none transition focus:border-neutral-900"
-                >
-                  <option value="" disabled>
-                    Pilih lokasi…
-                  </option>
-                  {LOCATION_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">▾</span>
-              </div>
+              <WilayahSelect value={location} onChange={setLocation} />
             </div>
 
             <div>

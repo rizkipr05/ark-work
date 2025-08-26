@@ -1,11 +1,11 @@
 {
   "signupperushaan": {},
   "companySignup": {
-    "title": "Create Company Account",
-    "subtitle": "Manage your job posts and hire top talent on ArkWork.",
+    "title": "Create a Company Account",
+    "subtitle": "Manage job postings and recruit top talent on ArkWork.",
     "form": {
       "company": "Company Name",
-      "contact": "Contact Person",
+      "contact": "PIC Name",
       "email": "Company Email",
       "phone": "Phone Number (optional)",
       "size": "Team Size (optional)",
@@ -16,22 +16,22 @@
       "toggleConfirm": "Show/hide confirmation"
     },
     "placeholder": {
-      "company": "e.g. ArkWork Indonesia, Inc.",
+      "company": "e.g. PT ArkWork Indonesia",
       "contact": "e.g. Rani Pratama",
       "email": "hr@company.com",
       "phone": "08xxxxxxxxxx",
       "size": "Select team size",
       "website": "company.com",
-      "password": "At least 8 characters",
-      "confirm": "Repeat your password"
+      "password": "Minimum 8 characters",
+      "confirm": "Repeat password"
     },
     "match": {
       "ok": "Passwords match",
       "no": "Passwords do not match"
     },
     "agree": {
-      "1": "I agree to the",
-      "terms": "Terms of Service",
+      "1": "I agree to",
+      "terms": "Terms & Conditions",
       "and": "and",
       "privacy": "Privacy Policy"
     },
@@ -43,15 +43,15 @@
     "signIn": "Sign in here",
     "error": {
       "default": "Something went wrong. Please try again.",
-      "google": "Google sign-up failed. Please try again.",
-      "agree": "You must agree to the Terms of Service.",
+      "google": "Google signup failed. Please try again.",
+      "agree": "You must agree to the Terms & Conditions.",
       "mismatch": "Password confirmation does not match.",
       "company": "Company name is too short.",
-      "contact": "Contact person name is too short."
+      "contact": "PIC name is too short."
     }
   },
 
-  "Halaman-home": {},
+  "halaman-home": {},
 
   "nav": {
     "home": "Home",
@@ -67,11 +67,11 @@
   "user": {
     "profile": "Profile",
     "dashboard": "Dashboard",
-    "logout": "Sign out",
+    "logout": "Log Out",
     "fallback": "User"
   },
   "emp": {
-    "dashboard": "Employer Dashboard",
+    "dashboard": "Company Dashboard",
     "postJob": "Post a Job",
     "manageJobs": "Manage Jobs",
     "applications": "Applications",
@@ -84,36 +84,36 @@
 
   "home": {
     "hero": {
-      "title": { "1": "Power Your Career in the", "2": "Energy Sector" },
-      "desc": "ArkWork connects energy professionals with opportunities across oil & gas, LNG, utilities, and emerging energy technologies. Browse jobs, get industry insights, and discover companies—all in one place.",
-      "cta": { "jobs": "Explore Jobs", "companies": "Browse Companies" }
+      "title": { "1": "Advance Your Career in", "2": "the Energy Sector" },
+      "desc": "ArkWork connects energy professionals with opportunities in oil & gas, LNG, utilities, and the latest energy technologies. Browse jobs, get industry insights, and discover companies—all in one place.",
+      "cta": { "jobs": "Browse Jobs", "companies": "View Companies" }
     },
     "explore": {
       "title": "Explore Without Signing In",
-      "desc": "Browse jobs, discover companies, and stay updated with industry news. Sign in only when you're ready to apply."
+      "desc": "Browse jobs, discover companies, and follow industry news. Sign in only when you’re ready to apply."
     },
     "card": {
-      "jobs": { "title": "Browse Jobs", "desc": "Search thousands of sector opportunities with advanced filters." },
-      "companies": { "title": "Discover Companies", "desc": "Explore energy companies and learn about their culture and opportunities." },
-      "news": { "title": "Industry News", "desc": "Stay updated with the latest energy sector news and tender opportunities." }
+      "jobs": { "title": "Browse Jobs", "desc": "Find thousands of energy sector opportunities with advanced filters." },
+      "companies": { "title": "Discover Companies", "desc": "Get to know energy companies, their culture, and career opportunities." },
+      "news": { "title": "Industry News", "desc": "Stay updated with news and tenders in the energy sector." }
     },
     "features": {
-      "title": "Everything You Need for Energy Careers",
-      "desc": "From job search to industry insights, ArkWork gives you complete tools to grow in the energy sector."
+      "title": "Everything You Need for an Energy Career",
+      "desc": "From job search to industry insights, ArkWork provides the complete toolkit to grow in the energy sector."
     },
     "feature": {
-      "1": { "title": "Smart Job Search", "desc": "Find energy jobs with AI matching and advanced filters." },
-      "2": { "title": "Company Profiles", "desc": "Explore companies and learn about their culture & opportunities." },
+      "1": { "title": "Smart Job Search", "desc": "Find energy jobs with AI matching & advanced filters." },
+      "2": { "title": "Company Profiles", "desc": "Understand companies, culture, and opportunities." },
       "3": { "title": "Talent Matching", "desc": "Get matched to roles based on your skills and experience." },
-      "4": { "title": "Industry News", "desc": "Follow the latest energy news and tenders." },
-      "5": { "title": "Professional Network", "desc": "Connect with energy professionals and leaders." },
+      "4": { "title": "Industry News", "desc": "Follow the latest news & tenders in the energy sector." },
+      "5": { "title": "Professional Networking", "desc": "Connect with professionals and industry leaders." },
       "6": { "title": "Energy Focus", "desc": "Deep coverage of oil & gas, LNG, and utilities." }
     },
     "final": {
-      "title": "Ready to Energize Your Career?",
-      "desc": "Join thousands who trust ArkWork for jobs, insights, and community.",
+      "title": "Ready to Boost Your Career?",
+      "desc": "Join thousands of professionals who trust ArkWork.",
       "cta": "Go to Dashboard",
-      "note": "No credit card required • Sign up takes less than 1 minute"
+      "note": "No credit card • Sign up in less than 1 minute"
     }
   },
 
@@ -143,32 +143,32 @@
 
   "about": {
     "title": "About",
-    "intro": "ArkWork is an innovative platform that connects job opportunities, tenders, and industry news with professionals and businesses across the energy sector.",
+    "intro": "ArkWork is an innovative platform that connects jobs, tenders, and industry news with professionals and businesses in the energy sector.",
     "vision": {
       "title": "Our Vision",
-      "desc": "To become the leading bridge between talented professionals, companies, and business opportunities—creating a collaborative ecosystem that drives economic growth and innovation."
+      "desc": "To be the main bridge between talent, companies, and business opportunities—creating a collaborative ecosystem that drives economic growth and innovation."
     },
     "mission": {
       "title": "Our Mission",
       "points": {
-        "1": "Provide easy access to the latest job openings and tenders.",
-        "2": "Help companies find the right talents efficiently.",
-        "3": "Deliver reliable and relevant industry news.",
-        "4": "Foster collaboration between industry players and professionals."
+        "1": "Provide easy access to the latest jobs and tenders.",
+        "2": "Help companies efficiently find the right talent.",
+        "3": "Deliver trusted and relevant industry news.",
+        "4": "Encourage collaboration between industry players and professionals."
       }
     },
     "values": {
-      "title": "Our Core Values",
+      "title": "Our Values",
       "items": {
-        "integrity": { "title": "Integrity", "desc": "We uphold honesty and transparency in all aspects of our work." },
-        "innovation": { "title": "Innovation", "desc": "We continuously adapt and create creative solutions for market needs." },
-        "collaboration": { "title": "Collaboration", "desc": "We believe in the power of synergy between individuals and organizations." },
-        "quality": { "title": "Quality", "desc": "We are committed to delivering the best services to our users." }
+        "integrity": { "title": "Integrity", "desc": "Upholding honesty and transparency in every aspect of work." },
+        "innovation": { "title": "Innovation", "desc": "Constantly adapting and creating creative solutions for market needs." },
+        "collaboration": { "title": "Collaboration", "desc": "Believing in the power of synergy between individuals and organizations." },
+        "quality": { "title": "Quality", "desc": "Committed to delivering the best service to users." }
       }
     },
     "closing": {
       "title": "Join ArkWork Today",
-      "desc": "Whether you are a professional seeking new opportunities or a company looking to hire top talent, ArkWork is the right place to start.",
+      "desc": "Whether you’re a professional looking for new opportunities or a company seeking top talent, ArkWork is the place to start.",
       "cta": "Explore Opportunities"
     }
   },
@@ -176,23 +176,23 @@
   "Halaman-signin": {},
 
   "signin": {
-    "title": "Sign in to ArkWork",
+    "title": "Sign In to ArkWork",
     "subtitle": "Welcome back! Please enter your details.",
     "form": {
       "email": "Email",
       "password": "Password",
-      "togglePw": "Toggle password visibility",
+      "togglePw": "Show/hide password",
       "remember": "Remember me",
       "forgot": "Forgot password?",
       "signInBtn": "Sign In",
       "signingIn": "Signing in..."
     },
     "googleBtn": "Sign in with Google",
-    "noAccount": "Don't have an account?",
+    "noAccount": "Don’t have an account?",
     "signUp": "Sign up",
     "or": "or",
     "error": {
-      "default": "Failed to sign in. Please check your credentials.",
+      "default": "Sign in failed. Please check your email & password.",
       "google": "Failed to sign in with Google."
     }
   },
@@ -200,24 +200,24 @@
   "Halaman-signup": {},
 
   "signup": {
-    "title": "Create your ArkWork account",
-    "subtitle": "It’s fast and free. Start your energy career journey.",
+    "title": "Create an ArkWork Account",
+    "subtitle": "Fast and free. Start your energy career journey.",
     "form": {
       "name": "Full Name",
       "email": "Email",
       "password": "Password",
       "confirm": "Confirm Password",
-      "togglePw": "Toggle password visibility",
-      "toggleConfirm": "Toggle confirm password visibility"
+      "togglePw": "Show/hide password",
+      "toggleConfirm": "Show/hide confirmation"
     },
     "placeholder": {
       "name": "Jane Doe",
       "email": "you@example.com",
-      "password": "At least 8 chars, mix Aa1",
-      "confirm": "Re-enter your password"
+      "password": "At least 8 characters, mix Aa1",
+      "confirm": "Re-enter password"
     },
     "agree": {
-      "1": "I agree to the",
+      "1": "I agree to",
       "terms": "Terms",
       "and": "and",
       "privacy": "Privacy"
@@ -227,42 +227,44 @@
     "or": "or",
     "google": "Continue with Google",
     "haveAccount": "Already have an account?",
-    "signIn": "Sign in",
+    "signIn": "Sign In",
     "match": {
       "ok": "Passwords match",
       "no": "Passwords do not match"
     },
     "error": {
-      "agree": "Please agree to the Terms & Privacy.",
+      "agree": "Please agree to Terms & Privacy.",
       "mismatch": "Passwords do not match.",
-      "default": "Failed to sign up. Please try again.",
-      "google": "Failed to continue with Google."
+      "default": "Failed to create account. Please try again.",
+      "google": "Google signup failed."
     }
   },
-
-  "Halaman-dashboard": {},
 
   "dashboard": {
     "greeting": "Hi, {name}!",
     "greetingSmall": "Welcome back",
-    "hero": { "subtitle": "See your recent activity and complete your profile for better job suggestions." },
-    "cta": { "findJobs": "Find Jobs" },
-    "fallback": { "there": "there", "job": "Job" },
+    "hero": {
+      "subtitle": "See your activity and complete your profile for better recommendations."
+    },
+    "cta": {
+      "findJobs": "Find Jobs"
+    },
+    "fallback": { "there": "you", "job": "Job" },
     "profile": {
       "title": "My Profile",
-      "desc": "Complete your profile to get better job recommendations",
+      "desc": "Complete your profile for more accurate job recommendations",
       "cta": "Edit Profile",
-      "badge": "Better recommendations",
+      "badge": "More accurate recommendations",
       "stats": {
         "profile": "Profile",
         "cv": "CV",
         "skills": "Skills",
-        "completeness": "Profile completeness"
+        "completeness": "Profile Completeness"
       }
     },
     "recent": {
       "title": "Recent Activity",
-      "empty": "No activity yet",
+      "empty": "No recent activity",
       "item": "Applied to {title} — {date}",
       "viewAll": "View All",
       "cta": { "findJobs": "Find Jobs" }
@@ -272,10 +274,10 @@
   "Halaman-jobs": {},
 
   "jobs": {
-    "heading": "Browse Jobs",
-    "subheading": "Energy, Renewables, Mining — curated roles for professionals.",
-    "search": { "placeholder": "Search role / company…" },
-    "sort": { "label": "Sort", "newest": "Newest first", "oldest": "Oldest first" },
+    "heading": "Search Jobs",
+    "subheading": "Energy, Renewables, Mining — role options for professionals.",
+    "search": { "placeholder": "Search position / company…" },
+    "sort": { "label": "Sort", "newest": "Newest", "oldest": "Oldest" },
     "filters": {
       "title": "Filters",
       "location": "Location",
@@ -295,9 +297,9 @@
       "view": "View details",
       "posted": "Posted {date}"
     },
-    "empty": { "title": "No jobs found", "desc": "Try adjusting filters or keywords." },
+    "empty": { "title": "No jobs found", "desc": "Try changing filters or keywords." },
     "detail": {
-      "empty": "Select a job to see details",
+      "empty": "Select a job to view details",
       "industry": "Industry",
       "contract": "Contract",
       "function": "Function",
@@ -309,7 +311,7 @@
     },
     "apply": {
       "needLogin": "Please sign in to apply.",
-      "dup": "You already applied to this job!",
+      "dup": "You have already applied to this job!",
       "ok": "Application submitted!"
     }
   },
@@ -320,19 +322,19 @@
     "title": "Energy & Oil & Gas News",
     "latest": "Latest Industry News",
     "readMore": "Read More",
-    "empty": "No articles found.",
+    "empty": "No articles available.",
     "error": { "load": "Failed to load news" },
     "scope": {
-      "id": "Scope: Indonesia",
-      "global": "Scope: Global",
-      "both": "Scope: Both"
+      "id": "Coverage: Indonesia",
+      "global": "Coverage: Global",
+      "both": "Coverage: Both"
     },
-    "lang": { "id": "Lang: ID", "en": "Lang: EN" },
+    "lang": { "id": "Language: ID", "en": "Language: EN" },
     "country": { "id": "Country: ID", "us": "Country: US" },
     "limit": { "n": "Limit: {n}" },
     "keywords": { "placeholder": "Custom keywords (optional)" },
     "btn": { "fetch": "Fetch News", "loading": "Loading…" },
-    "quick": { "placeholder": "Quick filter by title/source…", "clear": "Clear Filter" },
+    "quick": { "placeholder": "Quick filter title/source…", "clear": "Clear Filter" },
     "source": { "unknown": "Source" }
   },
 
@@ -344,15 +346,15 @@
       "name": "Full Name",
       "email": "Email",
       "location": "Location",
-      "phone": "Phone",
-      "skills": "Skills (comma-separated)",
+      "phone": "Phone Number",
+      "skills": "Skills (comma separated)",
       "cv": "Upload CV"
     },
     "ph": {
-      "name": "Jane Doe",
+      "name": "Budi Santoso",
       "location": "e.g. Jakarta, ID",
       "phone": "e.g. +62 812xxxxxxx",
-      "skills": "engineering, offshore, HSE"
+      "skills": "engineer, offshore, HSE"
     },
     "actions": {
       "save": "Save Profile",
@@ -364,11 +366,11 @@
       "uploading": "Uploading..."
     },
     "hints": {
-      "docPreview": "Inline preview is only for PDF. DOC/DOCX will open/download in a new tab.",
+      "docPreview": "Inline preview only for PDF. DOC/DOCX opens/downloads in a new tab.",
       "noCvYet": "No CV uploaded yet."
     },
     "toast": {
-      "saved": "Profile updated!",
+      "saved": "Profile successfully updated!",
       "notFound": "User not found in local data.",
       "failed": "Failed to save profile.",
       "cvUploaded": "CV uploaded successfully.",
@@ -378,14 +380,14 @@
     }
   },
 
-  "Halaman-tenders": {},
+  "Halaman-tender": {},
 
   "tenders": {
-    "title": "Browse Tenders",
+    "title": "Search Tenders",
     "subtitle": "Project & procurement opportunities for multi-team collaboration.",
     "ph": { "search": "Search title / buyer…" },
     "sort": {
-      "label": "Sort",
+      "label": "Sort by",
       "nearest": "Nearest deadline",
       "farthest": "Farthest deadline"
     },
@@ -439,13 +441,13 @@
       "none": "No documents"
     },
     "deadline": {
-      "closed": "Submissions closed",
+      "closed": "Submission closed",
       "today": "Due today",
-      "left": "{n} day{n, plural, one {} other {s}} left"
+      "left": "{n} days left"
     },
-    "detail": { "empty": "Select a tender to see details" },
-    "empty": { "title": "No tenders found", "desc": "Try adjusting filters or keywords." },
+    "detail": { "empty": "Select a tender to view details" },
+    "empty": { "title": "No tenders found", "desc": "Try changing filters or keywords." },
     "results": "{count} results",
-    "participate": { "alert": "Interested to participate: {title}\nPlease upload your documents in the next step." }
+    "participate": { "alert": "Interested in participating: {title}\nPlease upload documents in the next step." }
   }
 }

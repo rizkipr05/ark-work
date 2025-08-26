@@ -33,9 +33,56 @@ export type AuthCtx = {
 
 const Ctx = createContext<AuthCtx>(null as any);
 
+/* ===== Snapshot cache untuk hilangkan “mentul” saat refresh ===== */
+const LS_KEY = 'ark:auth:user:v1';
+const LS_TTL_MS = 1000 * 60 * 30; // 30 menit
+
+function readSnapshot(): UserLite | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw) as { ts: number; user: UserLite | null };
+    if (!obj?.ts) return null;
+    if (Date.now() - obj.ts > LS_TTL_MS) return null;
+    return obj.user ?? null;
+  } catch {
+    return null;
+  }
+}
+function writeSnapshot(user: UserLite | null) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), user }));
+  } catch {}
+}
+function clearSnapshot() {
+  try { localStorage.removeItem(LS_KEY); } catch {}
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<UserLite | null>(null);
+  // Mulai dari snapshot agar Nav langsung tahu role (tanpa flash guest)
+  const [user, setUser] = useState<UserLite | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return readSnapshot();
+  });
   const [loading, setLoading] = useState(true);
+
+  // Sinkron snapshot antar-tab
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LS_KEY) {
+        const snap = readSnapshot();
+        setUser(snap);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  // Helper setUser + cache
+  const setUserAndCache = (u: UserLite | null) => {
+    setUser(u);
+    writeSnapshot(u);
+  };
 
   // ===== Restore session (urut: employer → user → admin) =====
   useEffect(() => {
@@ -44,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 1) employer
         try {
           const e: any = await api('/api/employers/auth/me');
-          setUser({
+          const mapped: UserLite = {
             id: e?.admin?.id || 'unknown',
             email: e?.admin?.email,
             name: e?.admin?.fullName || e?.employer?.displayName || 'Employer',
@@ -52,37 +99,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             employer: e?.employer
               ? { id: e.employer.id, slug: e.employer.slug, displayName: e.employer.displayName }
               : null,
-          });
+          };
+          setUserAndCache(mapped);
           return; // stop kalau employer ketemu
         } catch {}
 
         // 2) user (kandidat)
         try {
           const u: any = await api('/auth/me');
-          setUser({
+          const mapped: UserLite = {
             id: u.id,
             email: u.email,
             name: u.name ?? null,
             photoUrl: u.photoUrl ?? null,
             cvUrl: u.cvUrl ?? null,
             role: 'user',
-          });
+          };
+          setUserAndCache(mapped);
           return;
         } catch {}
 
         // 3) admin
         try {
           const a: any = await api('/admin/me');
-          setUser({
+          const mapped: UserLite = {
             id: a?.id || `admin:${a?.username || 'unknown'}`,
             email: `${a?.username || 'admin'}@local`,
             name: a?.username || 'Admin',
             role: 'admin',
-          });
+          };
+          setUserAndCache(mapped);
           return;
         } catch {}
 
-        setUser(null);
+        // tidak login
+        setUserAndCache(null);
       } finally {
         setLoading(false);
       }
@@ -95,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const u: any = await api('/auth/signin', { json: { email: identifier, password } });
         const mapped: UserLite = { ...u, role: 'user' };
-        setUser(mapped);
+        setUserAndCache(mapped);
         return mapped;
       } catch {
         const a: any = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
@@ -105,7 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           name: a?.admin?.username || 'Admin',
           role: 'admin',
         };
-        setUser(mapped);
+        setUserAndCache(mapped);
         return mapped;
       }
     }
@@ -117,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: a?.admin?.username || 'Admin',
       role: 'admin',
     };
-    setUser(mapped);
+    setUserAndCache(mapped);
     return mapped;
   };
 
@@ -135,7 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? { id: resp.employer.id, slug: resp.employer.slug, displayName: resp.employer.displayName }
         : null,
     };
-    setUser(mapped);
+    setUserAndCache(mapped);
     return mapped;
   };
 
@@ -143,7 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signup: AuthCtx['signup'] = async (name, email, password) => {
     const u: any = await api('/auth/signup', { json: { name, email, password } });
     const mapped: UserLite = { ...u, role: 'user' };
-    setUser(mapped);
+    setUserAndCache(mapped);
     return mapped;
   };
 
@@ -152,6 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try { await api('/api/employers/auth/signout', { method: 'POST', expectJson: false }); } catch {}
     try { await api('/auth/signout', { method: 'POST', expectJson: false }); } catch {}
     try { await api('/admin/signout', { method: 'POST', expectJson: false }); } catch {}
+    clearSnapshot();
     setUser(null);
   };
 

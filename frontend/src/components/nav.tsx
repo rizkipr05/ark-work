@@ -283,7 +283,7 @@
                   <div className="py-1">
                     {/* Profile (dinamis) */}
                     <MenuItem
-                      href={isEmployer ? '/employer/profile_employer' : '/profile'}
+                      href={isEmployer ? '/profile_employer' : '/profile'}
                       onClick={() => setMenuOpen(false)}
                     >
                       <UserIcon className="h-4 w-4" />

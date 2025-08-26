@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 /* ===================== Types ===================== */
 type Msg = { id: string; role: 'user' | 'assistant'; text: string; ts: number };
@@ -253,15 +255,47 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
               </div>
             ) : (
               msgs.map((m) => (
-                <div key={m.id} className={['flex items-end gap-2', m.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}>
-                  {m.role === 'assistant' && <div className="h-7 w-7 shrink-0 rounded-lg bg-black text-white grid place-items-center text-xs">AW</div>}
+                <div
+                  key={m.id}
+                  className={['flex items-end gap-2', m.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}
+                >
+                  {m.role === 'assistant' && (
+                    <div className="h-7 w-7 shrink-0 rounded-lg bg-black text-white grid place-items-center text-xs">AW</div>
+                  )}
+
                   <div
                     className={[
                       'max-w-[80%] rounded-2xl px-3 py-2 text-sm',
                       m.role === 'user' ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-900',
                     ].join(' ')}
                   >
-                    <div className="whitespace-pre-wrap">{m.text}</div>
+                    {m.role === 'assistant' ? (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: (p) => <h1 className="text-base font-semibold mb-1" {...p} />,
+                          h2: (p) => <h2 className="text-sm font-semibold mt-2 mb-1" {...p} />,
+                          h3: (p) => <h3 className="text-sm font-semibold mt-2 mb-1" {...p} />,
+                          ul: (p) => <ul className="list-disc pl-5 space-y-1 my-1" {...p} />,
+                          ol: (p) => <ol className="list-decimal pl-5 space-y-1 my-1" {...p} />,
+                          li: (p) => <li className="leading-5" {...p} />,
+                          p:  (p) => <p className="leading-6 my-1" {...p} />,
+                          code: (p) => <code className="rounded bg-neutral-200 px-1 py-[1px] text-[0.85em]" {...p} />,
+                          pre: (p) => (
+                            <pre
+                              className="my-2 max-w-full overflow-x-auto rounded-lg bg-neutral-900 text-neutral-100 p-3 text-xs"
+                              {...p}
+                            />
+                          ),
+                          a: (p) => <a className="underline text-blue-600" target="_blank" rel="noreferrer" {...p} />
+                        }}
+                      >
+                        {m.text}
+                      </ReactMarkdown>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{m.text}</div>
+                    )}
+
                     <div className="mt-1 text-[10px] opacity-60 text-right">{formatTime(m.ts)}</div>
                   </div>
                 </div>
@@ -271,7 +305,9 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
             {busy && (
               <div className="flex items-end gap-2">
                 <div className="h-7 w-7 shrink-0 rounded-lg bg-black text-white grid place-items-center text-xs">AW</div>
-                <div className="bg-neutral-100 text-neutral-900 rounded-2xl px-3 py-2 text-sm">mengetik<span className="animate-pulse">…</span></div>
+                <div className="bg-neutral-100 text-neutral-900 rounded-2xl px-3 py-2 text-sm">
+                  mengetik<span className="animate-pulse">…</span>
+                </div>
               </div>
             )}
           </div>

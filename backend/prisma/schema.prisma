@@ -27,6 +27,44 @@ model Admin {
   updatedAt    DateTime @default(now()) @updatedAt
 }
 
+enum Sector {
+  OIL_GAS
+  RENEWABLE_ENERGY
+  UTILITIES
+  ENGINEERING
+}
+
+enum Status {
+  OPEN
+  PREQUALIFICATION
+  CLOSED
+}
+
+enum Contract {
+  EPC
+  SUPPLY
+  CONSULTING
+  MAINTENANCE
+}
+
+model Tender {
+  id          Int       @id @default(autoincrement())
+  title       String
+  buyer       String
+  sector      Sector
+  location    String
+  status      Status
+  contract    Contract
+  budgetUSD   Int
+  deadline    DateTime
+  teamSlots   Int
+  description String
+  documents   String[]   // ✅ diperbaiki
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
 model Employer {
   id             String                @id @default(uuid()) @db.Uuid
   slug           String                @unique
@@ -184,7 +222,6 @@ model SubscriptionItem {
   @@map("subscription_items")
 }
 
-/// * ============== Payment (Midtrans) ==============
 model Payment {
   id            String    @id @default(uuid()) @db.Uuid
   orderId       String    @unique @map("order_id")

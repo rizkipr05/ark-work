@@ -281,15 +281,16 @@
                   </div>
 
                   <div className="py-1">
+                    {/* Profile (dinamis) */}
                     <MenuItem
-                      href={isEmployer ? '/profile_employer' : '/profile'}
+                      href={isEmployer ? '/employer/profile_employer' : '/profile'}
                       onClick={() => setMenuOpen(false)}
                     >
                       <UserIcon className="h-4 w-4" />
                       <span>{t('user.profile', { defaultMessage: 'Profile' })}</span>
                     </MenuItem>
 
-                    {/* SATU item Dashboard saja, dinamis berdasarkan role */}
+                    {/* Dashboard (dinamis) */}
                     <MenuItem
                       href={isEmployer ? '/employer' : '/dashboard'}
                       onClick={() => setMenuOpen(false)}
@@ -302,7 +303,7 @@
                       </span>
                     </MenuItem>
 
-                    {/* Menu khusus employer (tanpa dashboard) */}
+                    {/* Menu khusus employer */}
                     {isEmployer && (
                       <>
                         <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
@@ -313,6 +314,20 @@
                         ))}
                       </>
                     )}
+
+                    {/* <- INI YANG HILANG: tombol Sign out */}
+                    <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
+                    <button
+                      role="menuitem"
+                      onClick={async () => {
+                        await handleSignout();
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-neutral-900"
+                    >
+                      <LogoutIcon className="h-4 w-4" />
+                      <span>{t('user.logout', { defaultMessage: 'Sign out' })}</span>
+                    </button>
                   </div>
                 </div>
               </div>

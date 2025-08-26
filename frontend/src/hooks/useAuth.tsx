@@ -34,12 +34,12 @@ export type AuthCtx = {
 const Ctx = createContext<AuthCtx>(null as any);
 
 /* ===== Snapshot cache untuk hilangkan “mentul” saat refresh ===== */
-const LS_KEY = 'ark:auth:user:v1';
+const LS_USER_KEY = 'ark:auth:user:v1';
 const LS_TTL_MS = 1000 * 60 * 30; // 30 menit
 
 function readSnapshot(): UserLite | null {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(LS_USER_KEY);
     if (!raw) return null;
     const obj = JSON.parse(raw) as { ts: number; user: UserLite | null };
     if (!obj?.ts) return null;
@@ -51,11 +51,19 @@ function readSnapshot(): UserLite | null {
 }
 function writeSnapshot(user: UserLite | null) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), user }));
+    localStorage.setItem(LS_USER_KEY, JSON.stringify({ ts: Date.now(), user }));
   } catch {}
 }
 function clearSnapshot() {
-  try { localStorage.removeItem(LS_KEY); } catch {}
+  try { localStorage.removeItem(LS_USER_KEY); } catch {}
+}
+
+/* ====== Persist employerId agar bisa dipakai di FE walau cookie beda-origin ====== */
+function persistEmployerId(eid?: string | null) {
+  try {
+    if (eid) localStorage.setItem('ark_eid', eid);
+    else localStorage.removeItem('ark_eid');
+  } catch {}
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -69,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sinkron snapshot antar-tab
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === LS_KEY) {
+      if (e.key === LS_USER_KEY) {
         const snap = readSnapshot();
         setUser(snap);
       }
@@ -78,10 +86,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // Helper setUser + cache
+  // Helper setUser + cache + persist employerId
   const setUserAndCache = (u: UserLite | null) => {
     setUser(u);
     writeSnapshot(u);
+    persistEmployerId(u?.role === 'employer' ? u.employer?.id || null : null);
   };
 
   // ===== Restore session (urut: employer → user → admin) =====
@@ -204,6 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try { await api('/auth/signout', { method: 'POST', expectJson: false }); } catch {}
     try { await api('/admin/signout', { method: 'POST', expectJson: false }); } catch {}
     clearSnapshot();
+    persistEmployerId(null);
     setUser(null);
   };
 

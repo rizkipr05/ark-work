@@ -3,13 +3,12 @@
 /* ====================== Backend helper (admin & lainnya) ====================== */
 
 export const API_BASE =
-  // dukung dua nama env, pilih salah satu yang ada
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE ||
   'http://localhost:4000';
 
 type ApiOpts = RequestInit & {
-  /** Jika diisi, otomatis method=POST dan body=JSON.stringify(json) */
+  /** Kirim body sebagai JSON; otomatis method=POST dan body=JSON.stringify(json) */
   json?: any;
   /** Jika respons 204 No Content, default return null */
   expectJson?: boolean; // default: true
@@ -24,14 +23,17 @@ type ApiOpts = RequestInit & {
 export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T> {
   const { json, headers, expectJson = true, ...rest } = opts;
 
+  // Siapkan headers dasar, TAPI jangan set Content-Type bila body FormData
+  const h = new Headers(headers || {});
+  const willSendJson = json !== undefined && !(rest.body instanceof FormData);
+
+  if (willSendJson) h.set('Content-Type', 'application/json');
+
   const init: RequestInit = {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(headers || {}),
-    },
+    credentials: 'include',                // ⬅️ Cookie emp_token ikut
+    headers: h,
     ...(json !== undefined ? { method: rest.method ?? 'POST', body: JSON.stringify(json) } : {}),
-    ...rest,
+    ...rest,                               // boleh override method/body dll.
   };
 
   const res = await fetch(`${API_BASE}${path}`, init);
@@ -50,16 +52,48 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
   return res.json() as Promise<T>;
 }
 
+/* =================== Helper khusus FormData / Upload =================== */
+
+/**
+ * Upload dengan FormData. Jangan set Content-Type manual; biarkan browser mengisi boundary.
+ * Contoh:
+ *   const fd = new FormData();
+ *   fd.append('file', file);
+ *   const r = await apiForm('/api/employers/profile/logo', fd);
+ */
+export async function apiForm<T = any>(path: string, form: FormData, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: form,
+    credentials: 'include',
+    // JANGAN set Content-Type di sini
+    ...opts,
+  });
+
+  if (!res.ok) {
+    let msg = `Request failed ${res.status}`;
+    try {
+      const data = await res.json();
+      msg = (data?.message || data?.error || msg);
+    } catch {}
+    throw new Error(msg);
+  }
+  // bila endpoint 204:
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) return null as unknown as T;
+  return res.json() as Promise<T>;
+}
+
 /* ================== Energy News (Google News RSS → rss2json) ================= */
 
 export type Scope = 'id' | 'global' | 'both';
 
 export interface FetchEnergyNewsParams {
-  scope: Scope;        // 'id' | 'global' | 'both'
-  limit: number;       // jumlah item
-  lang: string;        // 'id' | 'en'
-  country: string;     // 'ID' | 'US' | ISO-2 lain
-  keywords?: string;   // "pertamina, geothermal"
+  scope: Scope;
+  limit: number;
+  lang: string;
+  country: string;
+  keywords?: string;
 }
 
 export interface EnergyNewsItem {
@@ -155,7 +189,7 @@ function mapItem(it: any): EnergyNewsItem {
 
 /**
  * Ambil berita energi dari Google News (via rss2json).
- * NOTE: Public API ini ada rate limit. Untuk produksi, pertimbangkan proxy/route server sendiri.
+ * NOTE: Public API ini ada rate limit.
  */
 export async function fetchEnergyNews(
   params: FetchEnergyNewsParams
@@ -170,7 +204,6 @@ export async function fetchEnergyNews(
   if (scope === 'global' || scope === 'both') {
     urls.push(buildGoogleNewsRssUrl({ q, lang: 'en', country: 'US' }));
   }
-  // Jika scope spesifik dan user menentukan lang/country lain, pakai itu saja
   if (
     scope !== 'both' &&
     !((scope === 'id' && lang === 'id' && country === 'ID') ||
@@ -191,7 +224,6 @@ export async function fetchEnergyNews(
     }
   }
 
-  // de-dupe by link/title
   const seen = new Set<string>();
   const deduped = items.filter(it => {
     const key = it.link || it.title;

@@ -2,6 +2,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { parse as parseCookie } from 'cookie';
+import path from 'node:path';
+import fs from 'node:fs';
+import multer from 'multer';
 import {
   Step1Schema, Step2Schema, Step3Schema, Step4Schema, Step5Schema
 } from '../validators/employer';
@@ -17,27 +20,55 @@ import { prisma } from '../lib/prisma';
 
 export const employerRouter = Router();
 
-/* ================== AUTH HELPERS (selaras dgn routes/auth.ts) ================== */
+/* ================== AUTH HELPERS (PAKAI emp_token) ================== */
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
-type JWTPayload = {
-  uid: string;                  // user id
-  role: 'admin' | 'user';
-  eid?: string | null;          // employerId aktif (opsional)
+type EmployerJWTPayload = {
+  uid: string;             // employer admin user id
+  role: 'employer';
+  eid: string;             // employerId
+  iat?: number;
+  exp?: number;
 };
 
-function getAuth(req: Request): { userId: string; employerId?: string | null } | null {
+/** Ambil payload dari cookie emp_token */
+function getEmployerAuth(req: Request): { adminUserId: string; employerId: string } | null {
   const raw = req.headers.cookie || '';
   const cookies = parseCookie(raw);
-  const token = cookies['token'];
+  const token = cookies['emp_token']; // ⬅️ penting: cookie employer
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as JWTPayload;
-    return { userId: payload.uid, employerId: payload.eid ?? null };
+    const payload = jwt.verify(token, JWT_SECRET) as EmployerJWTPayload;
+    if (payload.role !== 'employer' || !payload.eid) return null;
+    return { adminUserId: payload.uid, employerId: payload.eid };
   } catch {
     return null;
   }
 }
+
+/* ================== MULTER (upload logo) ================== */
+const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'employers');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const name = `logo_${Date.now()}${ext || '.png'}`;
+    cb(null, name);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\//.test(file.mimetype)) return cb(new Error('Invalid file type'));
+    cb(null, true);
+  }
+});
+
+// Helper TS biar req.file tidak error
+type MulterReq = Request & { file?: Express.Multer.File };
 
 /* ================== ALUR 5 STEP SIGNUP EMPLOYER ================== */
 
@@ -53,15 +84,13 @@ employerRouter.get('/availability', async (req, res, next) => {
 });
 
 // POST /api/employers/step1
-// membuat akun employer + (opsional) user owner (bergantung implementasi kamu di services)
 employerRouter.post('/step1', async (req, res, next) => {
   try {
     const parsed = Step1Schema.parse(req.body);
     const result = await createAccount(parsed);
-    // TIDAK auto-login → user akan sign-in di akhir onboarding
     res.json({
       ok: true,
-      ...result,             // { employerId, employerSlug, userId? }
+      ...result,
       next: '/api/employers/step2',
     });
   } catch (e: any) {
@@ -110,13 +139,11 @@ employerRouter.post('/step4', async (req, res, next) => {
 });
 
 // POST /api/employers/step5 (submit verifikasi)
-// Setelah verifikasi tersubmit, arahkan FE untuk menampilkan CTA "Sign in"
 employerRouter.post('/step5', async (req, res, next) => {
   try {
     const parsed = Step5Schema.parse(req.body);
     const data = await submitVerification(parsed.employerId, parsed.note, parsed.files);
 
-    // Ambil slug utk query di /auth/signin (opsional)
     let slug: string | null = null;
     try {
       const emp = await prisma.employer.findUnique({
@@ -124,9 +151,7 @@ employerRouter.post('/step5', async (req, res, next) => {
         select: { slug: true },
       });
       slug = emp?.slug ?? null;
-    } catch {
-      slug = null;
-    }
+    } catch { slug = null; }
 
     res.json({
       ok: true,
@@ -141,72 +166,110 @@ employerRouter.post('/step5', async (req, res, next) => {
   }
 });
 
-/* ================== ENDPOINT SESI EMPLOYER (untuk Nav/FE) ================== */
-// GET /api/employers/me
-// Membaca cookie JWT (dibuat oleh /auth/signin) dan mengembalikan employer aktif
+/* ================== ENDPOINT SESI/UTILITY UNTUK FE ================== */
+
+/**
+ * GET /api/employers/me
+ * Mengembalikan employer aktif berdasarkan cookie emp_token
+ * (Berbeda dengan /api/employers/auth/me di employer-auth, tapi aman dipakai FE juga)
+ */
 employerRouter.get('/me', async (req: Request, res: Response) => {
-  const auth = getAuth(req);
+  const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
 
-  let employer:
-    | { id: string; slug: string; displayName: string | null; legalName: string | null }
-    | null = null;
+  const employer = await prisma.employer.findUnique({
+    where: { id: auth.employerId },
+    select: { id: true, slug: true, displayName: true, legalName: true, website: true },
+  });
 
-  // jika ada employerId di token (eid), pakai itu
-  if (auth.employerId) {
-    employer = await prisma.employer.findUnique({
-      where: { id: auth.employerId },
-      select: { id: true, slug: true, displayName: true, legalName: true },
-    });
-  }
-
-  // fallback tanpa ownerId: ambil employer pertama (urut terbaru)
-  if (!employer) {
-    employer = await prisma.employer.findFirst({
-      select: { id: true, slug: true, displayName: true, legalName: true },
-      // kalau schema tidak punya createdAt, hapus baris di bawah ini
-      orderBy: { createdAt: 'desc' },
-    });
-  }
+  if (!employer) return res.status(404).json({ message: 'Employer not found' });
 
   return res.json({ employer });
 });
 
-/* ================== (OPSIONAL) RINGKASAN / LISTING ==================
-   Endpoint berikut cocok dengan FE contoh. Silakan ganti query-nya
-   ke prisma model kamu yang sebenarnya atau hapus bila tak dibutuhkan.
-===================================================================== */
+/**
+ * GET /api/employers/profile?employerId=...
+ * Ambil profil perusahaan (profile table)
+ */
+employerRouter.get('/profile', async (req, res) => {
+  const employerId = (req.query.employerId as string) || '';
+  if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
-// GET /api/employers/stats
+  const p = await prisma.employerProfile.findUnique({
+    where: { employerId },
+    select: {
+      about: true, hqCity: true, hqCountry: true, logoUrl: true,
+      linkedin: true, instagram: true, twitter: true, facebook: true, youtube: true,
+    },
+  });
+  return res.json(p || {});
+});
+
+/**
+ * POST /api/employers/update-basic
+ * Body: { employerId, displayName?, legalName?, website? }
+ */
+employerRouter.post('/update-basic', async (req, res) => {
+  const { employerId, displayName, legalName, website } = req.body || {};
+  if (!employerId) return res.status(400).json({ message: 'employerId required' });
+
+  const data: any = {};
+  if (typeof displayName === 'string') data.displayName = displayName.trim();
+  if (typeof legalName === 'string') data.legalName = legalName.trim();
+  if (typeof website === 'string' || website === null) data.website = website || null;
+
+  if (!Object.keys(data).length) return res.json({ ok: true });
+
+  const updated = await prisma.employer.update({
+    where: { id: employerId },
+    data,
+    select: { id: true, displayName: true, legalName: true, website: true },
+  });
+  return res.json({ ok: true, employer: updated });
+});
+
+/**
+ * POST /api/employers/profile/logo  (multipart)
+ * FormData:
+ *   - employerId (text)
+ *   - file (image)
+ */
+employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => {
+  const mreq = req as MulterReq;
+  const employerId = (mreq.body?.employerId || '').trim();
+  if (!employerId) return res.status(400).json({ message: 'employerId required' });
+  if (!mreq.file) return res.status(400).json({ message: 'file required' });
+
+  const publicUrl = `/uploads/employers/${mreq.file.filename}`;
+
+  await prisma.employerProfile.upsert({
+    where: { employerId },
+    create: { employerId, logoUrl: publicUrl },
+    update: { logoUrl: publicUrl },
+  });
+
+  return res.json({ ok: true, url: publicUrl });
+});
+
+/* ========= contoh stats/jobs/applications dummy (optional) ========= */
 employerRouter.get('/stats', async (req, res) => {
-  const auth = getAuth(req);
+  const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
-
-  // contoh dummy; ganti dengan query real
   res.json({
-    activeJobs: 0,
-    totalApplicants: 0,
-    interviews: 0,
-    views: 0,
+    activeJobs: 0, totalApplicants: 0, interviews: 0, views: 0,
     lastUpdated: new Date().toISOString(),
   });
 });
 
-// GET /api/employers/jobs
 employerRouter.get('/jobs', async (req, res) => {
-  const auth = getAuth(req);
+  const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
-
-  // contoh dummy; ganti dengan query real dari prisma.job
   res.json([]);
 });
 
-// GET /api/employers/applications
 employerRouter.get('/applications', async (req, res) => {
-  const auth = getAuth(req);
+  const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
-
-  // contoh dummy; ganti dengan query real dari prisma.application
   res.json([]);
 });
 

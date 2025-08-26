@@ -1,229 +1,110 @@
-// backend/src/routes/employer-auth.ts
-import { Router, Request, Response } from 'express';
+// src/routes/employer-auth.ts
+import { Router } from 'express';
 import { prisma } from '../lib/prisma';
-import { z } from 'zod';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { serialize, parse as parseCookie } from 'cookie';
+import { parse as parseCookie, serialize as serializeCookie } from 'cookie';
+
+const EMP_COOKIE = 'emp_session';
+const SESSION_HOURS = 12;
+
+function makeCookie(id: string) {
+  const isProd = process.env.NODE_ENV === 'production';
+  return serializeCookie(EMP_COOKIE, id, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',          // aman untuk http://localhost:3000
+    path: '/',
+    maxAge: SESSION_HOURS * 60 * 60,
+  });
+}
 
 const router = Router();
 
-/* ======================= ENV & Helpers ======================= */
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const COOKIE_SAMESITE = (process.env.COOKIE_SAMESITE || 'lax') as
-  | 'lax'
-  | 'none'
-  | 'strict';
-const COOKIE_SECURE =
-  process.env.COOKIE_SECURE === 'true' ||
-  (process.env.NODE_ENV === 'production' && COOKIE_SAMESITE === 'none');
-
-type JWTPayload = { uid: string; role: 'employer'; eid: string };
-
-const sign = (p: JWTPayload, days = 7) =>
-  jwt.sign(p, JWT_SECRET, { expiresIn: `${days}d` });
-
-const setEmpCookie = (res: Response, token: string, maxAgeDays = 7) => {
-  res.setHeader(
-    'Set-Cookie',
-    serialize('emp_token', token, {
-      httpOnly: true,
-      sameSite: COOKIE_SAMESITE,
-      secure: COOKIE_SECURE,
-      path: '/',
-      maxAge: 60 * 60 * 24 * maxAgeDays, // days
-    })
-  );
-};
-
-const readEmpCookie = (req: Request) => {
-  const token = parseCookie(req.headers.cookie || '')['emp_token'];
-  if (!token) return null;
-  try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
-  } catch {
-    return null;
-  }
-};
-
-const slugify = (s: string) =>
-  s
-    .toLowerCase()
-    .trim()
-    .replace(/['"]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)+/g, '');
-
-async function ensureUniqueSlug(base: string): Promise<string> {
-  let slug = slugify(base) || 'company';
-  let suffix = 0;
-  // try up to N variations
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const exist = await prisma.employer.findUnique({ where: { slug } });
-    if (!exist) return slug;
-    suffix += 1;
-    slug = `${slugify(base)}-${suffix}`;
-  }
-}
-
-/* ======================= Schemas ======================= */
-const signinSchema = z.object({
-  usernameOrEmail: z.string().trim().min(3, 'username/email terlalu pendek'),
-  password: z.string().min(6, 'password terlalu pendek'),
-  rememberMe: z.boolean().optional(),
-});
-
-const websiteCoerce = z.preprocess((v) => {
-  const s = (typeof v === 'string' ? v : '').trim();
-  if (!s || s === '-' || s === '—') return undefined;
-  return s;
-}, z.string().url().optional());
-
-const signupSchema = z.object({
-  companyName: z.string().min(2, 'nama perusahaan minimal 2 karakter'),
-  email: z.string().email('email tidak valid'),
-  password: z.string().min(8, 'password minimal 8 karakter'),
-  website: websiteCoerce.optional(),
-  rememberMe: z.boolean().optional(),
-});
-
-/* ======================= Routes ======================= */
-/**
- * POST /api/employers/auth/signup
- * Buat Employer + EmployerAdminUser + set emp_token
- */
-router.post('/signup', async (req, res) => {
-  const parsed = signupSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ error: parsed.error.format(), message: 'Validation error' });
-  }
-
-  const { companyName, email, password, website, rememberMe } = parsed.data;
-  const emailNorm = email.toLowerCase();
-
-  try {
-    const exist = await prisma.employerAdminUser.findUnique({
-      where: { email: emailNorm },
-      select: { id: true },
-    });
-    if (exist) return res.status(409).json({ message: 'Email sudah terpakai' });
-
-    const slug = await ensureUniqueSlug(companyName);
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    const { employer, admin } = await prisma.$transaction(async (tx) => {
-      const employer = await tx.employer.create({
-        data: {
-          slug,
-          displayName: companyName,
-          legalName: companyName,
-          website: website ?? null,
-        },
-        select: { id: true, slug: true, displayName: true },
-      });
-
-      const admin = await tx.employerAdminUser.create({
-        data: {
-          employerId: employer.id,
-          email: emailNorm,
-          passwordHash,
-          fullName: companyName,
-          isOwner: true,
-          agreedTosAt: new Date(),
-        },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          employerId: true,
-          isOwner: true,
-        },
-      });
-
-      return { employer, admin };
-    });
-
-    const cookieDays = rememberMe ? 30 : 7;
-    const token = sign({ uid: admin.id, role: 'employer', eid: employer.id }, cookieDays);
-    setEmpCookie(res, token, cookieDays);
-
-    return res.status(201).json({ ok: true, admin, employer });
-  } catch (err: any) {
-    if (err?.code === 'P2002') {
-      return res.status(409).json({ message: 'Email atau slug sudah terpakai' });
-    }
-    console.error('employer signup error:', err);
-    return res.status(500).json({ message: 'Server error' });
-  }
-});
-
 /**
  * POST /api/employers/auth/signin
- * Login employer-admin
- * Body: { usernameOrEmail, password, rememberMe? }
+ * body: { usernameOrEmail, password }
  */
 router.post('/signin', async (req, res) => {
-  const parsed = signinSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ error: parsed.error.format(), message: 'Validation error' });
+  const { usernameOrEmail, password } = req.body || {};
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ error: 'MISSING_CREDENTIALS' });
   }
 
-  const { usernameOrEmail, password, rememberMe } = parsed.data;
-  const login = usernameOrEmail.trim().toLowerCase();
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login);
+  // cari admin user employer
+  const admin = await prisma.employerAdminUser.findFirst({
+    where: {
+      OR: [
+        { email: usernameOrEmail },
+        { fullName: usernameOrEmail },
+      ],
+    },
+    select: {
+      id: true,
+      passwordHash: true,
+      employerId: true,
+      employer: { select: { id: true, slug: true, displayName: true } },
+    },
+  });
 
-  try {
-    // skema saat ini hanya memiliki 'email' → lookup by email
-    const admin = await prisma.employerAdminUser.findUnique({
-      where: { email: isEmail ? login : login },
-    });
-
-    if (!admin) return res.status(401).json({ message: 'Email atau password salah' });
-
-    const ok = await bcrypt.compare(password, admin.passwordHash);
-    if (!ok) return res.status(401).json({ message: 'Email atau password salah' });
-
-    const employer = await prisma.employer.findUnique({
-      where: { id: admin.employerId },
-      select: { id: true, slug: true, displayName: true, legalName: true },
-    });
-    if (!employer) return res.status(404).json({ message: 'Employer tidak ditemukan' });
-
-    const cookieDays = rememberMe ? 30 : 7;
-    const token = sign({ uid: admin.id, role: 'employer', eid: employer.id }, cookieDays);
-    setEmpCookie(res, token, cookieDays);
-
-    return res.json({
-      ok: true,
-      admin: {
-        id: admin.id,
-        email: admin.email,
-        fullName: admin.fullName,
-        isOwner: !!admin.isOwner,
-      },
-      employer,
-    });
-  } catch (err) {
-    console.error('employer signin error:', err);
-    return res.status(500).json({ message: 'Server error' });
+  if (!admin || !admin.passwordHash) {
+    return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
   }
+
+  const ok = await bcrypt.compare(password, admin.passwordHash);
+  if (!ok) return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+
+  // pastikan employer ada
+  const employer = await prisma.employer.findUnique({
+    where: { id: admin.employerId },
+    select: { id: true, slug: true, displayName: true },
+  });
+  if (!employer) return res.status(401).json({ error: 'NO_EMPLOYER' });
+
+  // buat session TANPA userId (null) + employerId DIISI
+  const now = Date.now();
+  const session = await prisma.session.create({
+    data: {
+      userId: null,                 // <--- penting: null supaya tidak kena FK
+      employerId: employer.id,
+      createdAt: new Date(now),
+      lastSeenAt: new Date(now),
+      expiresAt: new Date(now + SESSION_HOURS * 60 * 60 * 1000),
+      ip: req.ip,
+      userAgent: req.get('user-agent') || '',
+    },
+    select: { id: true },
+  });
+
+  res.setHeader('Set-Cookie', makeCookie(session.id));
+  return res.json({
+    ok: true,
+    admin: { id: admin.id },
+    employer,
+  });
 });
 
 /**
  * POST /api/employers/auth/signout
  */
-router.post('/signout', (_req, res) => {
+router.post('/signout', async (req, res) => {
+  try {
+    const raw = req.headers.cookie || '';
+    const cookies = parseCookie(raw);
+    const sid = cookies[EMP_COOKIE];
+    if (sid) {
+      await prisma.session.updateMany({
+        where: { id: sid, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+  } catch {}
+  // hapus cookie
   res.setHeader(
     'Set-Cookie',
-    serialize('emp_token', '', {
+    serializeCookie(EMP_COOKIE, '', {
       httpOnly: true,
-      sameSite: COOKIE_SAMESITE,
-      secure: COOKIE_SECURE,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: 0,
     })
@@ -233,28 +114,40 @@ router.post('/signout', (_req, res) => {
 
 /**
  * GET /api/employers/auth/me
+ * Validasi cookie session → kembalikan admin & employer ringkas
  */
 router.get('/me', async (req, res) => {
-  try {
-    const p = readEmpCookie(req);
-    if (!p) return res.status(401).json({ message: 'Unauthorized' });
+  const raw = req.headers.cookie || '';
+  const cookies = parseCookie(raw);
+  const sid = cookies[EMP_COOKIE];
+  if (!sid) return res.status(401).json({ error: 'NO_SESSION' });
 
-    const admin = await prisma.employerAdminUser.findUnique({
-      where: { id: p.uid },
-      select: { id: true, email: true, fullName: true, employerId: true, isOwner: true },
-    });
-    if (!admin) return res.status(401).json({ message: 'Unauthorized' });
+  const s = await prisma.session.findUnique({
+    where: { id: sid },
+    select: {
+      employerId: true,
+      userId: true,
+      revokedAt: true,
+      expiresAt: true,
+    },
+  });
 
-    const employer = await prisma.employer.findUnique({
-      where: { id: p.eid },
-      select: { id: true, slug: true, displayName: true, legalName: true, website: true },
-    });
-
-    return res.json({ ok: true, admin, employer, role: 'employer' });
-  } catch (err) {
-    console.error('employer me error:', err);
-    return res.status(500).json({ message: 'Server error' });
+  if (!s || s.revokedAt || (s.expiresAt && s.expiresAt < new Date()) || !s.employerId) {
+    return res.status(401).json({ error: 'NO_SESSION' });
   }
+
+  const employer = await prisma.employer.findUnique({
+    where: { id: s.employerId },
+    select: { id: true, slug: true, displayName: true, legalName: true, website: true },
+  });
+
+  if (!employer) return res.status(404).json({ error: 'EMPLOYER_NOT_FOUND' });
+
+  return res.json({
+    ok: true,
+    admin: { id: s.userId || 'employer-admin' }, // nilai kosmetik
+    employer,
+  });
 });
 
 export default router;

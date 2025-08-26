@@ -1,12 +1,12 @@
 // src/routes/employer.ts
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { parse as parseCookie } from 'cookie';
 import path from 'node:path';
 import fs from 'node:fs';
 import multer from 'multer';
 import {
-  Step1Schema, Step2Schema, Step3Schema, Step4Schema, Step5Schema
+  Step1Schema, Step2Schema, Step3Schema, Step4Schema, Step5Schema,
 } from '../validators/employer';
 import {
   checkAvailability,
@@ -20,22 +20,21 @@ import { prisma } from '../lib/prisma';
 
 export const employerRouter = Router();
 
-/* ================== AUTH HELPERS (PAKAI emp_token) ================== */
+/* ================== AUTH HELPERS (pakai emp_token) ================== */
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
 type EmployerJWTPayload = {
-  uid: string;             // employer admin user id
+  uid: string;   // employer admin user id
   role: 'employer';
-  eid: string;             // employerId
+  eid: string;   // employerId
   iat?: number;
   exp?: number;
 };
 
-/** Ambil payload dari cookie emp_token */
 function getEmployerAuth(req: Request): { adminUserId: string; employerId: string } | null {
   const raw = req.headers.cookie || '';
   const cookies = parseCookie(raw);
-  const token = cookies['emp_token']; // ⬅️ penting: cookie employer
+  const token = cookies['emp_token'];
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET) as EmployerJWTPayload;
@@ -56,7 +55,7 @@ const storage = multer.diskStorage({
     const ext = path.extname(file.originalname).toLowerCase();
     const name = `logo_${Date.now()}${ext || '.png'}`;
     cb(null, name);
-  }
+  },
 });
 const upload = multer({
   storage,
@@ -64,10 +63,8 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (!/^image\//.test(file.mimetype)) return cb(new Error('Invalid file type'));
     cb(null, true);
-  }
+  },
 });
-
-// Helper TS biar req.file tidak error
 type MulterReq = Request & { file?: Express.Multer.File };
 
 /* ================== ALUR 5 STEP SIGNUP EMPLOYER ================== */
@@ -88,11 +85,7 @@ employerRouter.post('/step1', async (req, res, next) => {
   try {
     const parsed = Step1Schema.parse(req.body);
     const result = await createAccount(parsed);
-    res.json({
-      ok: true,
-      ...result,
-      next: '/api/employers/step2',
-    });
+    res.json({ ok: true, ...result, next: '/api/employers/step2' });
   } catch (e: any) {
     if (e?.code === 'P2002') return res.status(409).json({ error: 'Email already used' });
     if (e?.issues) return res.status(400).json({ error: 'Validation error', details: e.issues });
@@ -141,8 +134,14 @@ employerRouter.post('/step4', async (req, res, next) => {
 // POST /api/employers/step5 (submit verifikasi)
 employerRouter.post('/step5', async (req, res, next) => {
   try {
-    const parsed = Step5Schema.parse(req.body);
-    const data = await submitVerification(parsed.employerId, parsed.note, parsed.files);
+    // ❗ penting: beri tipe hasil parse agar files bertipe { url: string; type?: string }[]
+    const parsed = Step5Schema.parse(req.body) as import('../validators/employer').Step5Input;
+
+    const data = await submitVerification(
+      parsed.employerId,
+      parsed.note,
+      parsed.files as { url: string; type?: string }[]
+    );
 
     let slug: string | null = null;
     try {
@@ -168,11 +167,7 @@ employerRouter.post('/step5', async (req, res, next) => {
 
 /* ================== ENDPOINT SESI/UTILITY UNTUK FE ================== */
 
-/**
- * GET /api/employers/me
- * Mengembalikan employer aktif berdasarkan cookie emp_token
- * (Berbeda dengan /api/employers/auth/me di employer-auth, tapi aman dipakai FE juga)
- */
+/** GET /api/employers/me  — identitas employer aktif dari cookie emp_token */
 employerRouter.get('/me', async (req: Request, res: Response) => {
   const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
@@ -181,34 +176,37 @@ employerRouter.get('/me', async (req: Request, res: Response) => {
     where: { id: auth.employerId },
     select: { id: true, slug: true, displayName: true, legalName: true, website: true },
   });
-
   if (!employer) return res.status(404).json({ message: 'Employer not found' });
 
   return res.json({ employer });
 });
 
-/**
- * GET /api/employers/profile?employerId=...
- * Ambil profil perusahaan (profile table)
- */
+/** GET /api/employers/profile?employerId=... — ambil profile perusahaan */
 employerRouter.get('/profile', async (req, res) => {
   const employerId = (req.query.employerId as string) || '';
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
+  // ⚠️ Hapus field yang tidak ada di schema (facebook, youtube)
   const p = await prisma.employerProfile.findUnique({
     where: { employerId },
     select: {
-      about: true, hqCity: true, hqCountry: true, logoUrl: true,
-      linkedin: true, instagram: true, twitter: true, facebook: true, youtube: true,
+      about: true,
+      hqCity: true,
+      hqCountry: true,
+      logoUrl: true,
+      linkedin: true,
+      instagram: true,
+      twitter: true,
+      bannerUrl: true,
+      industry: true,
+      size: true,
+      foundedYear: true,
     },
   });
   return res.json(p || {});
 });
 
-/**
- * POST /api/employers/update-basic
- * Body: { employerId, displayName?, legalName?, website? }
- */
+/** POST /api/employers/update-basic — update displayName/legalName/website */
 employerRouter.post('/update-basic', async (req, res) => {
   const { employerId, displayName, legalName, website } = req.body || {};
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
@@ -228,12 +226,7 @@ employerRouter.post('/update-basic', async (req, res) => {
   return res.json({ ok: true, employer: updated });
 });
 
-/**
- * POST /api/employers/profile/logo  (multipart)
- * FormData:
- *   - employerId (text)
- *   - file (image)
- */
+/** POST /api/employers/profile/logo (multipart) — upload logo */
 employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => {
   const mreq = req as MulterReq;
   const employerId = (mreq.body?.employerId || '').trim();
@@ -251,7 +244,7 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
   return res.json({ ok: true, url: publicUrl });
 });
 
-/* ========= contoh stats/jobs/applications dummy (optional) ========= */
+/* ========= contoh stats/jobs/applications dummy ========= */
 employerRouter.get('/stats', async (req, res) => {
   const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });

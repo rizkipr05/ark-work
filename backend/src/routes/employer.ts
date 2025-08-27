@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import multer from 'multer';
 import {
   Step1Schema, Step2Schema, Step3Schema, Step4Schema, Step5Schema,
+  Step5Input,
 } from '../validators/employer';
 import {
   checkAvailability,
@@ -46,6 +47,7 @@ function getEmployerAuth(req: Request): { adminUserId: string; employerId: strin
 }
 
 /* ================== MULTER (upload logo) ================== */
+// ⬇⬇⬇ simpan ke /uploads, sama seperti static server di index.ts
 const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'employers');
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -69,7 +71,6 @@ type MulterReq = Request & { file?: Express.Multer.File };
 
 /* ================== ALUR 5 STEP SIGNUP EMPLOYER ================== */
 
-// GET /api/employers/availability?slug=...&email=...
 employerRouter.get('/availability', async (req, res, next) => {
   try {
     const data = await checkAvailability({
@@ -80,7 +81,6 @@ employerRouter.get('/availability', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/employers/step1
 employerRouter.post('/step1', async (req, res, next) => {
   try {
     const parsed = Step1Schema.parse(req.body);
@@ -93,7 +93,6 @@ employerRouter.post('/step1', async (req, res, next) => {
   }
 });
 
-// POST /api/employers/step2 (lengkapi profil perusahaan)
 employerRouter.post('/step2', async (req, res, next) => {
   try {
     const parsed = Step2Schema.parse(req.body);
@@ -106,7 +105,6 @@ employerRouter.post('/step2', async (req, res, next) => {
   }
 });
 
-// POST /api/employers/step3 (pilih paket)
 employerRouter.post('/step3', async (req, res, next) => {
   try {
     const parsed = Step3Schema.parse(req.body);
@@ -118,7 +116,6 @@ employerRouter.post('/step3', async (req, res, next) => {
   }
 });
 
-// POST /api/employers/step4 (buat draft job)
 employerRouter.post('/step4', async (req, res, next) => {
   try {
     const parsed = Step4Schema.parse(req.body);
@@ -131,16 +128,13 @@ employerRouter.post('/step4', async (req, res, next) => {
   }
 });
 
-// POST /api/employers/step5 (submit verifikasi)
 employerRouter.post('/step5', async (req, res, next) => {
   try {
-    // ❗ penting: beri tipe hasil parse agar files bertipe { url: string; type?: string }[]
-    const parsed = Step5Schema.parse(req.body) as import('../validators/employer').Step5Input;
-
+    const parsed = Step5Schema.parse(req.body) as Step5Input;
     const data = await submitVerification(
       parsed.employerId,
       parsed.note,
-      parsed.files as { url: string; type?: string }[]
+      parsed.files as { url: string; type?: string }[],
     );
 
     let slug: string | null = null;
@@ -167,7 +161,6 @@ employerRouter.post('/step5', async (req, res, next) => {
 
 /* ================== ENDPOINT SESI/UTILITY UNTUK FE ================== */
 
-/** GET /api/employers/me  — identitas employer aktif dari cookie emp_token */
 employerRouter.get('/me', async (req: Request, res: Response) => {
   const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
@@ -181,12 +174,10 @@ employerRouter.get('/me', async (req: Request, res: Response) => {
   return res.json({ employer });
 });
 
-/** GET /api/employers/profile?employerId=... — ambil profile perusahaan */
 employerRouter.get('/profile', async (req, res) => {
   const employerId = (req.query.employerId as string) || '';
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
-  // ⚠️ Hapus field yang tidak ada di schema (facebook, youtube)
   const p = await prisma.employerProfile.findUnique({
     where: { employerId },
     select: {
@@ -194,19 +185,19 @@ employerRouter.get('/profile', async (req, res) => {
       hqCity: true,
       hqCountry: true,
       logoUrl: true,
+      bannerUrl: true,
       linkedin: true,
       instagram: true,
       twitter: true,
-      bannerUrl: true,
       industry: true,
       size: true,
       foundedYear: true,
+      updatedAt: true,
     },
   });
   return res.json(p || {});
 });
 
-/** POST /api/employers/update-basic — update displayName/legalName/website */
 employerRouter.post('/update-basic', async (req, res) => {
   const { employerId, displayName, legalName, website } = req.body || {};
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
@@ -226,7 +217,6 @@ employerRouter.post('/update-basic', async (req, res) => {
   return res.json({ ok: true, employer: updated });
 });
 
-/** POST /api/employers/profile/logo (multipart) — upload logo */
 employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => {
   const mreq = req as MulterReq;
   const employerId = (mreq.body?.employerId || '').trim();
@@ -244,7 +234,7 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
   return res.json({ ok: true, url: publicUrl });
 });
 
-/* ========= contoh stats/jobs/applications dummy ========= */
+/* ========= contoh dummy ========= */
 employerRouter.get('/stats', async (req, res) => {
   const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });

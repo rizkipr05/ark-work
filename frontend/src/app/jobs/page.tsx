@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {useLocale, useTranslations} from 'next-intl';
 
-/* ---------------- Types ---------------- */
+/* ---------------- Types (UI) ---------------- */
 type Job = {
   id: number;
   title: string;
@@ -15,19 +15,66 @@ type Job = {
   posted: string; // YYYY-MM-DD
   description: string;
   company?: string;
+  logo?: string | null; // data URL
 };
 
-/* ---------------- Seed data ---------------- */
-const SEED: Job[] = [
-  { id:1, title:'Senior Petroleum Engineer', location:'Jakarta', industry:'Oil & Gas', contract:'Full-time', function:'Engineering', remote:'On-site', posted:'2024-01-15', description:'Lead subsurface planning, reservoir optimization, and well performance improvement in a multi-discipline team.', company: 'Pertamina EP' },
-  { id:2, title:'Project Manager - Renewable Energy', location:'Surabaya', industry:'Renewable Energy', contract:'Contract', function:'Management', remote:'Hybrid', posted:'2024-01-14', description:'Manage utility-scale solar/wind projects, stakeholders, budget, and HSE compliance.', company: 'Green Nusantara' },
-  { id:3, title:'Operations Supervisor', location:'Balikpapan', industry:'Oil & Gas', contract:'Full-time', function:'Operations', remote:'On-site', posted:'2024-01-13', description:'Oversee daily production activities, coordinate maintenance, and ensure safe operations.', company: 'Borneo Energy' },
-  { id:4, title:'Mining Engineer', location:'Bandung', industry:'Mining', contract:'Full-time', function:'Engineering', remote:'On-site', posted:'2024-01-12', description:'Design mine plans, optimize extraction schedule, and supervise field execution.', company: 'Terra Minerals' },
-  { id:5, title:'Environmental Consultant', location:'Jakarta', industry:'Oil & Gas', contract:'Contract', function:'Engineering', remote:'Remote', posted:'2024-01-11', description:'Conduct impact assessments, compliance advisory, and mitigation strategy for energy projects.', company: 'EcoSphere' },
-  { id:6, title:'Solar Panel Technician', location:'Bali', industry:'Renewable Energy', contract:'Part-time', function:'Operations', remote:'On-site', posted:'2024-01-10', description:'Install, test, and maintain rooftop PV with QA/QC and safety standards.', company: 'Sinar Surya' },
-  { id:7, title:'Drilling Engineer', location:'Pekanbaru', industry:'Oil & Gas', contract:'Full-time', function:'Engineering', remote:'On-site', posted:'2024-01-09', description:'Plan well programs, optimize drilling parameters, and coordinate service companies.', company: 'Riau Drilling' },
-  { id:8, title:'Energy Analyst', location:'Jakarta', industry:'Renewable Energy', contract:'Full-time', function:'Management', remote:'Hybrid', posted:'2024-01-08', description:'Analyze market trends, build financial models, and support investment decisions.', company: 'Energi Capital' }
-];
+const LS_KEY = 'ark_jobs';
+
+type LocalJob = {
+  id: string | number;
+  title: string;
+  company: string;
+  location: string;
+  type: 'full_time' | 'part_time' | 'contract' | 'internship';
+  remote?: boolean;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  currency?: string;
+  deadline?: string | null;
+  tags?: string[];
+  description?: string;
+  requirements?: string;
+  postedAt?: string; // ISO
+  status?: 'active' | 'closed';
+  logo?: string | null;
+};
+
+/* ---------- Normalizer ---------- */
+function guessIndustry(tags?: string[]): Job['industry'] {
+  const t = (tags ?? []).map(s => s.toLowerCase());
+  if (t.some(x => /renewable|solar|wind|pv|geothermal|hydro/.test(x))) return 'Renewable Energy';
+  if (t.some(x => /mining|mine|coal|nickel|mineral/.test(x))) return 'Mining';
+  return 'Oil & Gas';
+}
+function mapContract(t: LocalJob['type']): Job['contract'] {
+  switch (t) { case 'part_time': return 'Part-time'; case 'contract': return 'Contract'; default: return 'Full-time'; }
+}
+function mapFunctionFromText(j: LocalJob): Job['function'] {
+  const txt = `${j.title} ${j.description ?? ''}`.toLowerCase();
+  if (/(manager|lead|head|director|pm)/.test(txt)) return 'Management';
+  if (/(operator|technician|maintenance|operations)/.test(txt)) return 'Operations';
+  return 'Engineering';
+}
+function mapRemote(r?: boolean): Job['remote'] { return r ? 'Remote' : 'On-site'; }
+function isoToYmd(iso?: string): string {
+  try { const d = iso ? new Date(iso) : new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  catch { return iso || ''; }
+}
+function normalizeLocal(ls: LocalJob[]): Job[] {
+  return ls.filter(j => (j.status ?? 'active') === 'active').map((j, idx) => ({
+    id: typeof j.id === 'number' ? j.id : Number(String(j.id).replace(/\D/g,'')) || Date.now() + idx,
+    title: j.title,
+    company: j.company,
+    location: j.location || 'Indonesia',
+    industry: guessIndustry(j.tags),
+    contract: mapContract(j.type),
+    function: mapFunctionFromText(j),
+    remote: mapRemote(j.remote),
+    posted: isoToYmd(j.postedAt),
+    description: j.description || '',
+    logo: j.logo ?? null,
+  }));
+}
 
 /* ---------------- Page ---------------- */
 export default function JobsPage() {
@@ -41,11 +88,30 @@ export default function JobsPage() {
   const [sort, setSort] = useState<'newest'|'oldest'>('newest');
   const [drawer, setDrawer] = useState(false);
 
-  useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem('ark_jobs') ?? 'null');
-    if (!stored) localStorage.setItem('ark_jobs', JSON.stringify(SEED));
-    setJobs(stored ?? SEED);
+  const readLocal = (): LocalJob[] => {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]'); } catch { return []; }
+  };
 
+  const refresh = () => {
+    const ls = readLocal();
+    const normalized = normalizeLocal(ls);
+    const sorted = normalized.sort((a,b) =>
+      sort === 'newest'
+        ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
+        : new Date(a.posted).getTime() - new Date(b.posted).getTime()
+    );
+    setJobs(sorted);
+  };
+
+  useEffect(() => {
+    if (!localStorage.getItem(LS_KEY)) localStorage.setItem(LS_KEY, JSON.stringify([]));
+    refresh();
+    const onUpd = () => refresh();
+    window.addEventListener('ark:jobs-updated', onUpd);
+    return () => window.removeEventListener('ark:jobs-updated', onUpd);
+  }, [sort]);
+
+  useEffect(() => {
     const s = JSON.parse(localStorage.getItem('ark_saved_global') ?? '[]');
     setSaved(s);
   }, []);
@@ -159,12 +225,16 @@ export default function JobsPage() {
             items.map(job => (
               <article
                 key={job.id}
-                className="group rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition cursor-pointer"
-                onClick={() => setSelected(job)}
+                className="group rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
               >
                 <div className="flex gap-4">
-                  <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center text-white text-sm font-bold">
-                    {initials(job.company || 'AW')}
+                  <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
+                    {job.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt={job.company || 'logo'} src={job.logo} className="h-full w-full object-cover" />
+                    ) : (
+                      initials(job.company || 'AW')
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
@@ -175,7 +245,7 @@ export default function JobsPage() {
                         <p className="text-sm text-neutral-600 truncate">{job.company || t('common.company')}</p>
                       </div>
                       <button
-                        onClick={(e)=>{ e.stopPropagation(); toggleSave(job.id); }}
+                        onClick={()=>toggleSave(job.id)}
                         className={[
                           'rounded-lg border px-2.5 py-1 text-xs transition',
                           saved.includes(job.id)
@@ -201,7 +271,7 @@ export default function JobsPage() {
                       <span className="text-xs text-neutral-500">{t('common.posted', {date: formatPosted(job.posted)})}</span>
                       <button
                         className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs hover:opacity-90"
-                        onClick={(e)=>{ e.stopPropagation(); setSelected(job); }}
+                        onClick={()=>setSelected(job)}
                       >
                         {t('common.view')}
                       </button>
@@ -269,50 +339,32 @@ function FilterCard({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-function FilterInput({
-  label, value, onChange, icon
-}: { label:string; value:string; onChange:(v:string)=>void; icon?:React.ReactNode }) {
+function FilterInput({ label, value, onChange, icon }:{ label:string; value:string; onChange:(v:string)=>void; icon?:React.ReactNode }) {
   const t = useTranslations('jobs');
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">{icon}</span>
-        <input
-          value={value}
-          onChange={(e)=>onChange(e.target.value)}
-          className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
-          placeholder={t('filters.placeholder', {label: label.toLowerCase()})}
-        />
+        <input value={value} onChange={(e)=>onChange(e.target.value)} className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400" placeholder={t('filters.placeholder', {label: label.toLowerCase()})}/>
       </div>
     </label>
   );
 }
-
-function FilterSelect({
-  label, value, onChange, options, icon,
-}: { label:string; value:string; onChange:(v:string)=>void; options:string[]; icon?:React.ReactNode }) {
+function FilterSelect({ label, value, onChange, options, icon }:{ label:string; value:string; onChange:(v:string)=>void; options:string[]; icon?:React.ReactNode }) {
   const t = useTranslations('jobs');
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">{icon}</span>
-        <select
-          value={value}
-          onChange={(e)=>onChange(e.target.value)}
-          className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
-        >
-          {options.map(o => (
-            <option key={o || 'all'} value={o}>{o || t('filters.all', {label})}</option>
-          ))}
+        <select value={value} onChange={(e)=>onChange(e.target.value)} className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400">
+          {options.map(o => (<option key={o || 'all'} value={o}>{o || t('filters.all', {label})}</option>))}
         </select>
       </div>
     </label>
   );
 }
-
 function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1">
@@ -321,7 +373,6 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
     </div>
   );
 }
-
 function DetailPanel({
   job, onApply, onSave, saved, tns, formatPosted
 }: {
@@ -342,8 +393,13 @@ function DetailPanel({
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm sticky top-24">
       <div className="flex items-start gap-3">
-        <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center text-white text-sm font-bold">
-          {initials(job.company || 'AW')}
+        <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
+          {job.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img alt={job.company || 'logo'} src={job.logo} className="h-full w-full object-cover" />
+          ) : (
+            initials(job.company || 'AW')
+          )}
         </div>
         <div>
           <h2 className="text-lg font-bold text-neutral-900">{job.title}</h2>
@@ -376,7 +432,6 @@ function DetailPanel({
     </div>
   );
 }
-
 function Info({ label, value }: { label:string; value:string }) {
   return (
     <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
@@ -385,7 +440,6 @@ function Info({ label, value }: { label:string; value:string }) {
     </div>
   );
 }
-
 function Drawer({ children, onClose, title }:{children:React.ReactNode; onClose:()=>void; title:string}) {
   return (
     <div className="fixed inset-0 z-50 md:hidden">
@@ -402,7 +456,6 @@ function Drawer({ children, onClose, title }:{children:React.ReactNode; onClose:
     </div>
   );
 }
-
 function EmptyState({t}:{t:ReturnType<typeof useTranslations>}) {
   return (
     <div className="rounded-3xl border border-dashed border-neutral-300 bg-white p-10 text-center">
@@ -415,17 +468,17 @@ function EmptyState({t}:{t:ReturnType<typeof useTranslations>}) {
   );
 }
 
-/* ---------------- Icons ---------------- */
+/* Icons */
 function SearchIcon(props: React.SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" {...props}><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> }
 function PinIcon(props: React.SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2"/></svg> }
 function LayersIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" /><path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" /><path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" /></svg>) }
 function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" /><path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" /><path d="M3 12h18" stroke="currentColor" strokeWidth="2" /></svg>) }
-function CogIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="2" /><path d="M19.4 15a7.97 7.97 0 000-6l-2.1.5a6 6 0 00-1.5-1.5l.5-2.1a8 8 0 00-6 0l.5 2.1a6 6 0 00-1.5 1.5l-2.1-.5a7.97 7.97 0 000 6l2.1-.5a6 6 0 001.5 1.5l-.5 2.1a8 8 0 006 0l-.5-2.1a6 6 0 001.5-1.5l2.1.5z" stroke="currentColor" strokeWidth="2" /></svg>) }
+function CogIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="2" /><path d="M19.4 15a7.97 7.97 0 000-6l-2.1.5a6 6 0 00-1.5-1.5l.5-2.1a8 8 0 00-6 0l.5 2.1a6 6 0 001.5-1.5l-2.1-.5a7.97 7.97 0 000 6l2.1-.5z" stroke="currentColor" strokeWidth="2" /></svg>) }
 function GlobeIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" /><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" stroke="currentColor" strokeWidth="2" /></svg>) }
 function FilterIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><path d="M4 6h16M6 12h12M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>) }
 function CloseIcon(props: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...props}><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>) }
 
-/* ---------------- Utils ---------------- */
+/* Utils */
 function initials(name: string) {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0,2).toUpperCase();

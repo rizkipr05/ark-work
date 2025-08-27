@@ -1,4 +1,3 @@
-// src/index.ts
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -6,15 +5,17 @@ import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import http from 'node:http';
 
-// Routers
+// Routers (perhatikan mana default dan mana named)
 import authRouter from './routes/auth';
 import newsRouter from './routes/news';
 import chatRouter from './routes/chat';
 import adminRouter from './routes/admin';
-import { employerRouter } from './routes/employer';
+import { employerRouter } from './routes/employer'; // <-- ini memang named
 import employerAuthRouter from './routes/employer-auth';
 import adminPlansRouter from './routes/admin-plans';
 import paymentsRouter from './routes/payments';
+import tendersRouter from './routes/tenders';
+import adminTendersRouter from './routes/admin-tenders'; // <-- DEFAULT IMPORT (perbaikan)
 
 // Role guards (optional)
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -37,7 +38,7 @@ if (NODE_ENV === 'production') {
 
 /* --------------------------------- CORS --------------------------------- */
 const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000'];
-const envAllowed = FRONTEND_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
+const envAllowed = FRONTEND_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
 const allowedOrigins = Array.from(new Set([...defaultAllowed, ...envAllowed]));
 
 const corsOptions: cors.CorsOptions = {
@@ -64,7 +65,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '2mb' })); // JSON only (webhook payments juga JSON)
 
 /* -------------------------------- Static -------------------------------- */
-// ⬅️ penting: serve dari public/uploads (bukan uploads di root)
+// serve static dari public/uploads
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
 /* -------------------------------- Health -------------------------------- */
@@ -72,10 +73,21 @@ app.get('/', (_req, res) => res.send('OK'));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 /* -------------------------------- Routes -------------------------------- */
-app.use('/auth', authRouter);                  // kandidat
+// Auth kandidat/user
+app.use('/auth', authRouter);
+
+// Admin auth / dasar (kalau ada)
 app.use('/admin', adminRouter);
+
+// News & Chat API
 app.use('/api/news', newsRouter);
 app.use('/api/chat', chatRouter);
+
+// Tenders publik (list untuk user)
+app.use('/api/tenders', tendersRouter);
+
+// Admin manage tenders (CRUD admin)
+app.use('/admin/tenders', adminTendersRouter); // <-- perbaikan di sini
 
 // Employer auth (signup/signin/signout/me)
 app.use('/api/employers/auth', employerAuthRouter);

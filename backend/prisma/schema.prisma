@@ -7,6 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/* ===================== User & Admin ===================== */
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -27,6 +28,7 @@ model Admin {
   updatedAt    DateTime @default(now()) @updatedAt
 }
 
+/* ===================== Tender ===================== */
 enum Sector {
   OIL_GAS
   RENEWABLE_ENERGY
@@ -61,10 +63,11 @@ model Tender {
   description String
   documents   String[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
+/* ===================== Employer ===================== */
 model Employer {
   id             String                @id @default(uuid()) @db.Uuid
   slug           String                @unique
@@ -104,8 +107,8 @@ model EmployerProfile {
   linkedin    String?
   twitter     String?
   instagram   String?
-  facebook    String? // <-- ditambahkan
-  youtube     String? // <-- ditambahkan
+  facebook    String?
+  youtube     String?
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   employer    Employer     @relation(fields: [employerId], references: [id], onDelete: Cascade)
@@ -178,6 +181,7 @@ model EmployerMeta {
   @@map("employer_meta")
 }
 
+/* ===================== Plans / Payments ===================== */
 model Plan {
   id            String         @id @default(uuid()) @db.Uuid
   slug          String         @unique
@@ -249,6 +253,7 @@ model Payment {
   @@map("payments")
 }
 
+/* ===================== Jobs ===================== */
 model Job {
   id          String   @id @default(uuid()) @db.Uuid
   employerId  String   @map("employer_id") @db.Uuid
@@ -266,6 +271,7 @@ model Job {
   @@map("jobs")
 }
 
+/* ===================== Verification ===================== */
 model VerificationRequest {
   id         String             @id @default(uuid()) @db.Uuid
   employerId String             @map("employer_id") @db.Uuid
@@ -304,9 +310,10 @@ model VerifyToken {
   @@map("verify_tokens")
 }
 
+/* ===================== Sessions ===================== */
 model Session {
   id         String    @id @default(cuid())
-  userId     String? // <-- dibuat opsional
+  userId     String?   // optional
   employerId String?   @db.Uuid
   createdAt  DateTime  @default(now()) @db.Timestamptz(6)
   expiresAt  DateTime  @db.Timestamptz(6)
@@ -315,7 +322,7 @@ model Session {
   userAgent  String?
   revokedAt  DateTime?
 
-  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade) // <-- opsional
+  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   employer Employer? @relation(fields: [employerId], references: [id])
 
   @@index([userId])
@@ -324,6 +331,7 @@ model Session {
   @@map("sessions")
 }
 
+/* ===================== Enums lainnya ===================== */
 enum EmployerStatus {
   draft
   active

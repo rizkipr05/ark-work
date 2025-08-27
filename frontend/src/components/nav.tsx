@@ -16,11 +16,8 @@ const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:';
 function toAbs(u?: string | null) {
   if (!u) return undefined;
   try {
-    // kalau sudah absolute http(s)
-    if (/^https?:\/\//i.test(u)) return u;
-    // kalau sudah absolute origin FE (mis. /_next/... dll) biarkan
-    if (u.startsWith('/_next')) return u;
-    // path relatif upload → prefix API_BASE
+    if (/^https?:\/\//i.test(u)) return u;          // sudah absolute
+    if (u.startsWith('/_next')) return u;           // asset Next
     return `${API_BASE}${u.startsWith('/') ? '' : '/'}${u}`;
   } catch {
     return u || undefined;
@@ -34,8 +31,8 @@ export default function Nav() {
   const router = useRouter();
   const { user, loading, signout } = useAuth();
 
-  // sembunyikan nav di /admin/*
-  if (pathname?.startsWith('/admin')) return null;
+  // 🚫 JANGAN return null di sini. Simpan flag saja.
+  const hide = pathname?.startsWith('/admin') ?? false;
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -174,6 +171,9 @@ export default function Nav() {
     document.body.style.overflow = open ? 'hidden' : '';
   }, [open]);
 
+  // ✅ hooks sudah dipanggil semua; sekarang boleh sembunyikan Nav di /admin
+  if (hide) return null;
+
   return (
     <nav className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200/60 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-neutral-800 dark:bg-neutral-950/60">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -283,9 +283,7 @@ export default function Nav() {
                         {displayName}
                       </p>
                       {!!email && (
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                          {email}
-                        </p>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</p>
                       )}
                     </div>
                   </div>
@@ -498,8 +496,7 @@ function Avatar({ src, alt, size = 32 }: { src?: string; alt: string; size?: num
         height={size}
         className="h-8 w-8 rounded-full object-cover ring-1 ring-neutral-200 dark:ring-neutral-800"
         onError={(e) => {
-          // jika gagal load, fallback ke inisial
-          (e.currentTarget.style.display = 'none');
+          (e.currentTarget.style.display = 'none'); // fallback ke inisial
         }}
       />
     );

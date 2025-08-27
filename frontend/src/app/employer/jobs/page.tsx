@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import Nav from '@/components/nav';
 import Footer from '@/components/Footer';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
+/* ---------------- Types ---------------- */
 type LocalJob = {
   id: number | string;
   title: string;
@@ -20,54 +20,167 @@ type LocalJob = {
   tags?: string[];
   description?: string;
   requirements?: string;
-  postedAt?: string;
-  status?: 'active' | 'closed';
-  logo?: string | null;
+  postedAt?: string;                  // ISO
+  status?: 'active' | 'closed';       // <— penting: union type
+  logo?: string | null;               // dataURL/logo url (opsional)
 };
 
 const LS_KEY = 'ark_jobs';
 
+/* ---------------- UI: Modern Alerts ---------------- */
+function AlertModal({
+  title = 'Berhasil',
+  message,
+  variant = 'success',
+  onClose,
+}: {
+  title?: string;
+  message: string;
+  variant?: 'success' | 'error' | 'info';
+  onClose: () => void;
+}) {
+  const ring =
+    variant === 'success'
+      ? 'bg-emerald-100 text-emerald-600'
+      : variant === 'error'
+      ? 'bg-rose-100 text-rose-600'
+      : 'bg-blue-100 text-blue-600';
+
+  const icon = (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      {variant === 'success' && <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />}
+      {variant === 'error' && <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />}
+      {variant === 'info' && (
+        <>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01" />
+          <circle cx="12" cy="12" r="9" />
+        </>
+      )}
+    </svg>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full transition-all duration-200 ease-out animate-in fade-in-0 zoom-in-95">
+          <div className={`flex h-12 w-12 items-center justify-center rounded-full ${ring}`}>{icon}</div>
+        </div>
+        <h2 className="text-center text-lg font-semibold text-slate-900">{title}</h2>
+        <p className="mt-2 text-center text-sm text-slate-600">{message}</p>
+        <div className="mt-5">
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Oke
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({
+  title = 'Konfirmasi',
+  message,
+  confirmText = 'Ya, lanjutkan',
+  cancelText = 'Batal',
+  onConfirm,
+  onCancel,
+}: {
+  title?: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+          <svg className="h-6 w-6" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 4h.01" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.29 3.86l-7.4 12.84A2 2 0 004.53 20h14.94a2 2 0 001.64-3.3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+        </div>
+        <h3 className="text-center text-lg font-semibold text-slate-900">{title}</h3>
+        <p className="mt-2 text-center text-sm text-slate-600">{message}</p>
+        <div className="mt-6 flex items-center justify-center gap-2">
+          <button
+            onClick={onCancel}
+            className="w-full rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {cancelText}
+          </button>
+          <button
+            onClick={onConfirm}
+            className="w-full rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"
+          >
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Helpers ---------------- */
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+/* ---------------- Page ---------------- */
 export default function EmployerJobsPage() {
-  const router = useRouter();
   const [jobs, setJobs] = useState<LocalJob[]>([]);
+  const [alertMsg, setAlertMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<LocalJob | null>(null);
 
+  // load awal
   useEffect(() => {
-    load();
-    const onUpd = () => load();
-    window.addEventListener('ark:jobs-updated', onUpd);
-    return () => window.removeEventListener('ark:jobs-updated', onUpd);
-  }, []);
-
-  function load() {
     try {
       const arr: LocalJob[] = JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
-      arr.sort((a, b) => new Date(b.postedAt ?? 0).getTime() - new Date(a.postedAt ?? 0).getTime());
       setJobs(arr);
     } catch {
       setJobs([]);
     }
-  }
+  }, []);
 
-  function save(next: LocalJob[]) {
+  function save(next: LocalJob[], successMessage?: string) {
     localStorage.setItem(LS_KEY, JSON.stringify(next));
     setJobs(next);
+    // beri tahu halaman /jobs agar refresh
     window.dispatchEvent(new Event('ark:jobs-updated'));
+    if (successMessage) setAlertMsg(successMessage);
+  }
+
+  function remove(id: LocalJob['id']) {
+    setConfirmDelete(null);
+    const filtered = jobs.filter((j) => String(j.id) !== String(id));
+    save(filtered, 'Job berhasil dihapus.');
   }
 
   function toggleStatus(id: LocalJob['id']) {
     const next = jobs.map((j) => {
       if (String(j.id) !== String(id)) return j;
-      const nextStatus: LocalJob['status'] =
-        (j.status ?? 'active') === 'active' ? 'closed' : 'active';
-      return { ...j, status: nextStatus };
+      const current: 'active' | 'closed' = j.status ?? 'active';
+      const updated: 'active' | 'closed' = current === 'active' ? 'closed' : 'active';
+      return { ...j, status: updated };
     });
-    save(next);
+    save(next, 'Status berhasil diperbarui.');
   }
 
-  function removeJob(id: LocalJob['id']) {
-    if (!confirm('Hapus lowongan ini?')) return;
-    save(jobs.filter((j) => String(j.id) !== String(id)));
-  }
+  const sorted = useMemo(
+    () =>
+      [...jobs].sort((a, b) => {
+        const ta = new Date(a.postedAt ?? 0).getTime();
+        const tb = new Date(b.postedAt ?? 0).getTime();
+        return tb - ta;
+      }),
+    [jobs]
+  );
 
   return (
     <>
@@ -97,69 +210,95 @@ export default function EmployerJobsPage() {
                   <th className="px-4 py-3">Tipe</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Diposting</th>
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((j) => {
-                  const isClosed = (j.status ?? 'active') === 'closed';
+                {sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-600">
+                      Belum ada lowongan. Klik <span className="font-medium text-slate-900">Post a Job</span>.
+                    </td>
+                  </tr>
+                )}
+
+                {sorted.map((j) => {
+                  const friendlyType =
+                    j.type === 'full_time'
+                      ? 'Full-time'
+                      : j.type === 'part_time'
+                      ? 'Part-time'
+                      : j.type === 'contract'
+                      ? 'Contract'
+                      : 'Internship';
+
                   return (
-                    <tr
-                      key={j.id}
-                      className={`border-b last:border-0 ${
-                        isClosed ? 'bg-slate-100 text-slate-400' : ''
-                      }`}
-                    >
-                      <td className="px-4 py-3 font-medium">
-                        {isClosed ? <s>{j.title}</s> : j.title}
-                      </td>
+                    <tr key={j.id} className="border-b last:border-0">
+                      {/* Title + avatar/logo */}
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {j.logo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={j.logo}
-                              alt={j.company}
-                              className="h-6 w-6 rounded object-cover"
-                            />
-                          ) : (
-                            <div className="grid h-6 w-6 place-items-center rounded bg-slate-200 text-[10px] font-semibold">
-                              {initials(j.company || 'CO')}
-                            </div>
-                          )}
-                          <span>{isClosed ? <s>{j.company}</s> : j.company}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 text-sm font-bold text-white">
+                            {j.logo ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={j.logo} alt="logo" className="h-full w-full object-cover" />
+                            ) : (
+                              initials(j.company || 'AW')
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-medium text-slate-900">{j.title}</div>
+                            <div className="text-xs text-slate-500">{j.tags?.slice(0, 3).join(' • ')}</div>
+                          </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">{j.location} {j.remote ? '• Remote' : ''}</td>
-                      <td className="px-4 py-3">{mapType(j.type)}</td>
+
+                      {/* Company */}
+                      <td className="px-4 py-3 text-slate-700">{j.company}</td>
+
+                      {/* Location */}
+                      <td className="px-4 py-3 text-slate-700">
+                        {j.location} {j.remote ? '• Remote' : ''}
+                      </td>
+
+                      {/* Type */}
+                      <td className="px-4 py-3 text-slate-700">{friendlyType}</td>
+
+                      {/* Status badge */}
                       <td className="px-4 py-3">
                         <span
-                          className={
-                            isClosed
-                              ? 'rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700'
-                              : 'rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700'
-                          }
+                          className={[
+                            'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium',
+                            (j.status ?? 'active') === 'active'
+                              ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200'
+                              : 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+                          ].join(' ')}
                         >
-                          {isClosed ? 'inactive' : 'active'}
+                          {(j.status ?? 'active') === 'active' ? 'Active' : 'Closed'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">{formatDate(j.postedAt)}</td>
+
+                      {/* Posted date */}
+                      <td className="px-4 py-3 text-slate-700">
+                        {j.postedAt ? new Date(j.postedAt).toLocaleDateString() : '-'}
+                      </td>
+
+                      {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
                           <Link
                             href={`/employer/jobs/new?id=${j.id}`}
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50"
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
                           >
                             Edit
                           </Link>
                           <button
                             onClick={() => toggleStatus(j.id)}
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50"
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
                           >
-                            {isClosed ? 'Buka lagi' : 'Tutup'}
+                            {(j.status ?? 'active') === 'active' ? 'Tutup' : 'Buka'}
                           </button>
                           <button
-                            onClick={() => removeJob(j.id)}
+                            onClick={() => setConfirmDelete(j)}
                             className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-rose-700 hover:bg-rose-100"
                           >
                             Hapus
@@ -169,46 +308,34 @@ export default function EmployerJobsPage() {
                     </tr>
                   );
                 })}
-                {jobs.length === 0 && (
-                  <tr>
-                    <td className="px-4 py-6 text-slate-600" colSpan={7}>
-                      Belum ada lowongan. Klik <b>Post a Job</b> untuk mulai mempublikasikan.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
         </div>
+
+        {/* Alert success */}
+        {alertMsg && (
+          <AlertModal
+            title="Berhasil"
+            message={alertMsg}
+            variant="success"
+            onClose={() => setAlertMsg(null)}
+          />
+        )}
+
+        {/* Confirm delete */}
+        {confirmDelete && (
+          <ConfirmModal
+            title="Hapus Lowongan?"
+            message={`Anda yakin ingin menghapus "${confirmDelete.title}" di ${confirmDelete.company}? Tindakan ini tidak dapat dibatalkan.`}
+            confirmText="Ya, hapus"
+            cancelText="Batal"
+            onCancel={() => setConfirmDelete(null)}
+            onConfirm={() => remove(confirmDelete.id)}
+          />
+        )}
       </main>
       <Footer />
     </>
   );
-}
-
-/* ---------------- Utils ---------------- */
-function mapType(t: LocalJob['type']) {
-  switch (t) {
-    case 'part_time':
-      return 'Part-time';
-    case 'contract':
-      return 'Contract';
-    case 'internship':
-      return 'Internship';
-    default:
-      return 'Full-time';
-  }
-}
-
-function formatDate(iso?: string) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
-}
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
 }

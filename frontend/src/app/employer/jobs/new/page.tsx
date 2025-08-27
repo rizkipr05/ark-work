@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+/* ---------------- Types ---------------- */
 type LocalJob = {
   id: number | string;
   title: string;
@@ -24,6 +25,40 @@ type LocalJob = {
 
 const LS_KEY = 'ark_jobs';
 
+/* ---------------- Alert Modal Modern ---------------- */
+function AlertModal({
+  title = 'Berhasil',
+  message,
+  onClose,
+}: {
+  title?: string;
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <h2 className="text-center text-lg font-semibold text-slate-900">{title}</h2>
+        <p className="mt-2 text-center text-sm text-slate-600">{message}</p>
+        <div className="mt-5">
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Oke
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Page ---------------- */
 export default function NewJobPage() {
   const router = useRouter();
   const qs = useSearchParams();
@@ -31,6 +66,7 @@ export default function NewJobPage() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -46,6 +82,7 @@ export default function NewJobPage() {
     description: '',
     requirements: '',
   });
+
   const [logo, setLogo] = useState<string | null>(null); // data URL
   const [logoName, setLogoName] = useState<string>('');
 
@@ -129,10 +166,12 @@ export default function NewJobPage() {
       }
 
       localStorage.setItem(LS_KEY, JSON.stringify(arr));
+
+      // beri tahu halaman /jobs agar refresh
       window.dispatchEvent(new Event('ark:jobs-updated'));
 
-      // langsung ke /jobs
-      router.push('/jobs');
+      // tampilkan alert modern
+      setSuccessMsg(editId ? 'Job berhasil diperbarui.' : 'Job berhasil diposting.');
     } catch (err: any) {
       setError(err?.message || 'Gagal menyimpan lowongan.');
     } finally {
@@ -169,31 +208,59 @@ export default function NewJobPage() {
             </div>
             <div>
               <label className="block text-xs text-slate-600 mb-1">Company Logo</label>
-              <input type="file" accept="image/*" onChange={onPickLogo}
-                     className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-slate-300 file:px-3 file:py-1.5 file:bg-white" />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onPickLogo}
+                className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-slate-300 file:px-3 file:py-1.5 file:bg-white"
+              />
               {logoName && <div className="mt-1 text-xs text-slate-600 truncate">{logoName}</div>}
             </div>
           </div>
 
+          {/* Company & Title */}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Company Name</span>
-              <input value={form.company} onChange={(e)=>set('company', e.target.value)} required className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="PT ArkWork Indonesia" />
+              <input
+                value={form.company}
+                onChange={(e)=>set('company', e.target.value)}
+                required
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="PT ArkWork Indonesia"
+              />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Job Title</span>
-              <input value={form.title} onChange={(e)=>set('title', e.target.value)} required className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Frontend Engineer" />
+              <input
+                value={form.title}
+                onChange={(e)=>set('title', e.target.value)}
+                required
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Frontend Engineer"
+              />
             </label>
           </div>
 
+          {/* Location & Type */}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Location</span>
-              <input value={form.location} onChange={(e)=>set('location', e.target.value)} required className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Jakarta / Remote" />
+              <input
+                value={form.location}
+                onChange={(e)=>set('location', e.target.value)}
+                required
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Jakarta / Remote"
+              />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Type</span>
-              <select value={form.type} onChange={(e)=>set('type', e.target.value as any)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <select
+                value={form.type}
+                onChange={(e)=>set('type', e.target.value as any)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              >
                 <option value="full_time">Full-time</option>
                 <option value="part_time">Part-time</option>
                 <option value="contract">Contract</option>
@@ -202,59 +269,131 @@ export default function NewJobPage() {
             </label>
           </div>
 
+          {/* Currency, Deadline, Remote */}
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Currency</span>
-              <select value={form.currency} onChange={(e)=>set('currency', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-                <option>IDR</option><option>USD</option>
+              <select
+                value={form.currency}
+                onChange={(e)=>set('currency', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option>IDR</option>
+                <option>USD</option>
               </select>
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Deadline</span>
-              <input type="date" value={form.deadline} onChange={(e)=>set('deadline', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+              <input
+                type="date"
+                value={form.deadline}
+                onChange={(e)=>set('deadline', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              />
             </label>
             <label className="mt-6 inline-flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={form.remote} onChange={(e)=>set('remote', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+              <input
+                type="checkbox"
+                checked={form.remote}
+                onChange={(e)=>set('remote', e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
               Remote-friendly
             </label>
           </div>
 
+          {/* Salary */}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Salary Min</span>
-              <input inputMode="numeric" pattern="[0-9]*" value={form.salaryMin} onChange={(e)=>set('salaryMin', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="10000000" />
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={form.salaryMin}
+                onChange={(e)=>set('salaryMin', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="10000000"
+              />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Salary Max</span>
-              <input inputMode="numeric" pattern="[0-9]*" value={form.salaryMax} onChange={(e)=>set('salaryMax', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="20000000" />
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={form.salaryMax}
+                onChange={(e)=>set('salaryMax', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="20000000"
+              />
             </label>
           </div>
 
+          {/* Tags */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Tags (comma separated)</span>
-            <input value={form.tags} onChange={(e)=>set('tags', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="react, nextjs, tailwind" />
+            <input
+              value={form.tags}
+              onChange={(e)=>set('tags', e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              placeholder="react, nextjs, tailwind"
+            />
           </label>
 
+          {/* Description */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Description</span>
-            <textarea value={form.description} onChange={(e)=>set('description', e.target.value)} rows={5} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Describe the role, team, responsibilities..." />
+            <textarea
+              value={form.description}
+              onChange={(e)=>set('description', e.target.value)}
+              rows={5}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              placeholder="Describe the role, team, responsibilities..."
+            />
           </label>
 
+          {/* Requirements */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Requirements</span>
-            <textarea value={form.requirements} onChange={(e)=>set('requirements', e.target.value)} rows={5} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="e.g., 3+ years of experience, familiar with React, etc." />
+            <textarea
+              value={form.requirements}
+              onChange={(e)=>set('requirements', e.target.value)}
+              rows={5}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              placeholder="e.g., 3+ years of experience, familiar with React, etc."
+            />
           </label>
 
+          {/* Actions */}
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={() => history.back()} className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => history.back()}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={busy} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            >
               {busy ? (editId ? 'Updating…' : 'Publishing…') : (editId ? 'Update Job' : 'Publish Job')}
             </button>
           </div>
         </form>
       </div>
+
+      {/* Alert modal */}
+      {successMsg && (
+        <AlertModal
+          title="Berhasil"
+          message={successMsg}
+          onClose={() => {
+            setSuccessMsg(null);
+            router.push('/jobs');
+          }}
+        />
+      )}
     </main>
   );
 }

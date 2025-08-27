@@ -1,9 +1,10 @@
-import type { Metadata } from 'next'
-import AdminSidebar from './components/AdminSidebar'
+// src/app/admin/layout.tsx
+import type { Metadata } from 'next';
+import AdminSidebar from './components/AdminSidebar';
 
 export const metadata: Metadata = {
   title: 'Admin | ArkWork',
-}
+};
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -24,5 +25,5 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </main>
       </div>
     </div>
-  )
+  );
 }

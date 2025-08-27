@@ -1,21 +1,41 @@
 // frontend/src/lib/api.ts
 
-/* ====================== Backend helper (admin & lainnya) ====================== */
-
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE ||
   'http://localhost:4000';
 
 type ApiOpts = RequestInit & {
-  /** Kirim body sebagai JSON; otomatis method=POST dan body=JSON.stringify(json) */
+  /** Body sebagai JSON (auto set method=POST, body=JSON.stringify) */
   json?: any;
-  /** Jika respons 204 No Content, default return null */
-  expectJson?: boolean; // default: true
+  /** Kalau false atau 204, fungsi mengembalikan null */
+  expectJson?: boolean; // default true
 };
 
+/** Gabungkan base + path dengan aman */
+function buildUrl(path: string) {
+  if (!path) return API_BASE;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+/** Ambil pesan error paling masuk akal dari response */
+async function readErrorMessage(res: Response) {
+  try {
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const data: any = await res.json();
+      return data?.message || data?.error || `HTTP ${res.status}`;
+    }
+    const text = await res.text();
+    return text || `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
+
 /**
- * Panggil backend Express (cookie ikut terkirim).
+ * Wrapper fetch utama (cookie ikut).
  * Contoh:
  *   await api('/admin/signin', { json: { username, password } })
  *   const me = await api('/admin/me')
@@ -23,64 +43,58 @@ type ApiOpts = RequestInit & {
 export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T> {
   const { json, headers, expectJson = true, ...rest } = opts;
 
-  // Siapkan headers dasar, TAPI jangan set Content-Type bila body FormData
   const h = new Headers(headers || {});
-  const willSendJson = json !== undefined && !(rest.body instanceof FormData);
+  const sendingFormData = rest.body instanceof FormData;
+  const willSendJson = json !== undefined && !sendingFormData;
 
   if (willSendJson) h.set('Content-Type', 'application/json');
 
   const init: RequestInit = {
-    credentials: 'include',                // ⬅️ Cookie emp_token ikut
+    credentials: 'include', // ⬅️ penting agar emp_token ikut
     headers: h,
     ...(json !== undefined ? { method: rest.method ?? 'POST', body: JSON.stringify(json) } : {}),
-    ...rest,                               // boleh override method/body dll.
+    ...rest,
   };
 
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetch(buildUrl(path), init);
 
   if (!res.ok) {
-    // coba ambil pesan error dari JSON; kalau gagal pakai fallback
-    let msg = `Request failed ${res.status}`;
-    try {
-      const data = await res.json();
-      msg = (data?.message || data?.error || msg);
-    } catch { /* ignore */ }
-    throw new Error(msg);
+    throw new Error(await readErrorMessage(res));
   }
 
-  if (res.status === 204 || !expectJson) return null as unknown as T;
+  if (res.status === 204 || !expectJson) {
+    // @ts-expect-error
+    return null;
+  }
+
+  // Jangan paksa parse JSON kalau server tidak kirim JSON
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    
+    return (await res.text()) as T;
+  }
+
   return res.json() as Promise<T>;
 }
 
 /* =================== Helper khusus FormData / Upload =================== */
-
-/**
- * Upload dengan FormData. Jangan set Content-Type manual; biarkan browser mengisi boundary.
- * Contoh:
- *   const fd = new FormData();
- *   fd.append('file', file);
- *   const r = await apiForm('/api/employers/profile/logo', fd);
- */
 export async function apiForm<T = any>(path: string, form: FormData, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(buildUrl(path), {
     method: 'POST',
     body: form,
     credentials: 'include',
-    // JANGAN set Content-Type di sini
-    ...opts,
+    ...opts, // jangan set Content-Type manual; biarkan browser
   });
 
   if (!res.ok) {
-    let msg = `Request failed ${res.status}`;
-    try {
-      const data = await res.json();
-      msg = (data?.message || data?.error || msg);
-    } catch {}
-    throw new Error(msg);
+    throw new Error(await readErrorMessage(res));
   }
-  // bila endpoint 204:
+
   const ct = res.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) return null as unknown as T;
+  if (!ct.includes('application/json')) {
+    // @ts-expect-error
+    return null;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -110,7 +124,7 @@ export interface EnergyNewsResponse {
   items: EnergyNewsItem[];
 }
 
-// Utilities
+// Utils
 function stripHtml(input?: string): string {
   if (!input) return '';
   return input.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
@@ -120,12 +134,9 @@ function getDomain(url?: string): string {
     if (!url) return '';
     const u = new URL(url);
     return u.hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 
-// Build Google News RSS URL
 function buildGoogleNewsRssUrl(params: { q: string; lang: string; country: string }) {
   const { q, lang, country } = params;
   const hl = `${lang}-${country}`;
@@ -140,25 +151,15 @@ async function fetchRssAsJson(rssUrl: string) {
   if (!res.ok) throw new Error(`RSS fetch failed: ${res.status} ${res.statusText}`);
   return res.json() as Promise<{
     items: Array<{
-      title: string;
-      link: string;
-      pubDate?: string;
-      author?: string;
-      description?: string;
-      content?: string;
-      enclosure?: { link?: string };
+      title: string; link: string; pubDate?: string; author?: string;
+      description?: string; content?: string; enclosure?: { link?: string };
     }>;
   }>;
 }
 
 function buildQuery(baseKeywords?: string) {
-  const defaults = [
-    'oil','gas','energy','petroleum','geothermal','renewable','minyak','energi','migas',
-  ];
-  const extra = (baseKeywords || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
+  const defaults = ['oil','gas','energy','petroleum','geothermal','renewable','minyak','energi','migas'];
+  const extra = (baseKeywords || '').split(',').map(s => s.trim()).filter(Boolean);
   const all = Array.from(new Set([...defaults, ...extra]));
   return all.map(k => `"${k}"`).join(' OR ');
 }
@@ -187,40 +188,26 @@ function mapItem(it: any): EnergyNewsItem {
   };
 }
 
-/**
- * Ambil berita energi dari Google News (via rss2json).
- * NOTE: Public API ini ada rate limit.
- */
-export async function fetchEnergyNews(
-  params: FetchEnergyNewsParams
-): Promise<EnergyNewsResponse> {
+export async function fetchEnergyNews(params: FetchEnergyNewsParams): Promise<EnergyNewsResponse> {
   const { scope, limit, lang, country, keywords } = params;
   const q = buildQuery(keywords);
 
   const urls: string[] = [];
-  if (scope === 'id' || scope === 'both') {
-    urls.push(buildGoogleNewsRssUrl({ q, lang: 'id', country: 'ID' }));
-  }
-  if (scope === 'global' || scope === 'both') {
-    urls.push(buildGoogleNewsRssUrl({ q, lang: 'en', country: 'US' }));
-  }
+  if (scope === 'id' || scope === 'both') urls.push(buildGoogleNewsRssUrl({ q, lang: 'id', country: 'ID' }));
+  if (scope === 'global' || scope === 'both') urls.push(buildGoogleNewsRssUrl({ q, lang: 'en', country: 'US' }));
   if (
     scope !== 'both' &&
-    !((scope === 'id' && lang === 'id' && country === 'ID') ||
-      (scope === 'global' && lang === 'en' && country === 'US'))
+    !((scope === 'id' && lang === 'id' && country === 'ID') || (scope === 'global' && lang === 'en' && country === 'US'))
   ) {
     urls.length = 0;
     urls.push(buildGoogleNewsRssUrl({ q, lang, country }));
   }
 
   const results = await Promise.allSettled(urls.map(u => fetchRssAsJson(u)));
-
   const items: EnergyNewsItem[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled') {
-      for (const it of r.value.items ?? []) {
-        items.push(mapItem(it));
-      }
+      for (const it of r.value.items ?? []) items.push(mapItem(it));
     }
   }
 
@@ -232,11 +219,6 @@ export async function fetchEnergyNews(
     return true;
   });
 
-  deduped.sort((a, b) => {
-    const ta = a.pubDate ? +new Date(a.pubDate) : 0;
-    const tb = b.pubDate ? +new Date(b.pubDate) : 0;
-    return tb - ta;
-  });
-
+  deduped.sort((a, b) => (+(b.pubDate ? new Date(b.pubDate) : 0) - +(a.pubDate ? new Date(a.pubDate) : 0)));
   return { items: deduped.slice(0, Math.max(1, limit)) };
 }

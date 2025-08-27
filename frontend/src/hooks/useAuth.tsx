@@ -29,17 +29,18 @@ export type AuthCtx = {
   signinEmployer: (usernameOrEmail: string, password: string) => Promise<UserLite>;
 
   signout: () => Promise<void>;
+  refresh: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx>(null as any);
 
-/* ===== Snapshot cache untuk hilangkan “mentul” saat refresh ===== */
-const LS_USER_KEY = 'ark:auth:user:v1';
+/* ================= Snapshot cache (untuk UX cepat) ================= */
+const LS_KEY = 'ark:auth:user:v1';
 const LS_TTL_MS = 1000 * 60 * 30; // 30 menit
 
 function readSnapshot(): UserLite | null {
   try {
-    const raw = localStorage.getItem(LS_USER_KEY);
+    const raw = localStorage.getItem(LS_KEY);
     if (!raw) return null;
     const obj = JSON.parse(raw) as { ts: number; user: UserLite | null };
     if (!obj?.ts) return null;
@@ -51,174 +52,181 @@ function readSnapshot(): UserLite | null {
 }
 function writeSnapshot(user: UserLite | null) {
   try {
-    localStorage.setItem(LS_USER_KEY, JSON.stringify({ ts: Date.now(), user }));
+    localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), user }));
   } catch {}
 }
 function clearSnapshot() {
-  try { localStorage.removeItem(LS_USER_KEY); } catch {}
-}
-
-/* ====== Persist employerId agar bisa dipakai di FE walau cookie beda-origin ====== */
-function persistEmployerId(eid?: string | null) {
   try {
-    if (eid) localStorage.setItem('ark_eid', eid);
-    else localStorage.removeItem('ark_eid');
+    localStorage.removeItem(LS_KEY);
   } catch {}
 }
 
+/* ================= Helper nama tampilan ================= */
+const prefixEmail = (e?: string | null) =>
+  (e && e.includes('@') ? e.split('@')[0] : e) || '';
+
+const nameForEmployer = (e: any) =>
+  e?.employer?.displayName?.trim() ||
+  e?.admin?.fullName?.trim() ||
+  prefixEmail(e?.admin?.email) ||
+  'Company';
+
+const nameForUser = (u: any) =>
+  (u?.name && String(u.name).trim()) || prefixEmail(u?.email) || 'User';
+
+const nameForAdmin = (a: any) => (a?.username?.trim?.() || 'Admin');
+
+/* ================= Mapper respons → UserLite ================= */
+function mapEmployerMe(resp: any): UserLite {
+  return {
+    id: resp?.admin?.id || 'unknown',
+    email: resp?.admin?.email || undefined,
+    name: nameForEmployer(resp),
+    role: 'employer',
+    employer: resp?.employer
+      ? { id: resp.employer.id, slug: resp.employer.slug, displayName: resp.employer.displayName }
+      : null,
+  };
+}
+
+function mapCandidateMe(resp: any): UserLite {
+  // bisa berbentuk { ok, user: { ... } } ATAU langsung object user
+  const u = resp?.user ?? resp;
+  return {
+    id: u?.id,
+    email: u?.email,
+    name: nameForUser(u),
+    photoUrl: u?.photoUrl ?? null,
+    cvUrl: u?.cvUrl ?? null,
+    role: 'user',
+  };
+}
+
+function mapAdminMe(resp: any): UserLite {
+  // bisa { id, username } atau { admin: {...} }
+  const a = resp?.admin ?? resp;
+  return {
+    id: a?.id || `admin:${a?.username || 'unknown'}`,
+    email: `${a?.username || 'admin'}@local`,
+    name: nameForAdmin(a),
+    role: 'admin',
+  };
+}
+
+/* ================= Provider ================= */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Mulai dari snapshot agar Nav langsung tahu role (tanpa flash guest)
   const [user, setUser] = useState<UserLite | null>(() => {
     if (typeof window === 'undefined') return null;
     return readSnapshot();
   });
   const [loading, setLoading] = useState(true);
 
-  // Sinkron snapshot antar-tab
+  // sinkron antar-tab
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === LS_USER_KEY) {
-        const snap = readSnapshot();
-        setUser(snap);
-      }
+      if (e.key === LS_KEY) setUser(readSnapshot());
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // Helper setUser + cache + persist employerId
   const setUserAndCache = (u: UserLite | null) => {
     setUser(u);
     writeSnapshot(u);
-    persistEmployerId(u?.role === 'employer' ? u.employer?.id || null : null);
   };
 
-  // ===== Restore session (urut: employer → user → admin) =====
-  useEffect(() => {
-    (async () => {
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      // 1) employer (emp_token)
       try {
-        // 1) employer
-        try {
-          const e: any = await api('/api/employers/auth/me');
-          const mapped: UserLite = {
-            id: e?.admin?.id || 'unknown',
-            email: e?.admin?.email,
-            name: e?.admin?.fullName || e?.employer?.displayName || 'Employer',
-            role: 'employer',
-            employer: e?.employer
-              ? { id: e.employer.id, slug: e.employer.slug, displayName: e.employer.displayName }
-              : null,
-          };
-          setUserAndCache(mapped);
-          return; // stop kalau employer ketemu
-        } catch {}
+        const e = await api('/api/employers/auth/me');
+        setUserAndCache(mapEmployerMe(e));
+        return;
+      } catch {}
 
-        // 2) user (kandidat)
-        try {
-          const u: any = await api('/auth/me');
-          const mapped: UserLite = {
-            id: u.id,
-            email: u.email,
-            name: u.name ?? null,
-            photoUrl: u.photoUrl ?? null,
-            cvUrl: u.cvUrl ?? null,
-            role: 'user',
-          };
-          setUserAndCache(mapped);
-          return;
-        } catch {}
+      // 2) user / candidate
+      try {
+        const u = await api('/auth/me');
+        setUserAndCache(mapCandidateMe(u));
+        return;
+      } catch {}
 
-        // 3) admin
-        try {
-          const a: any = await api('/admin/me');
-          const mapped: UserLite = {
-            id: a?.id || `admin:${a?.username || 'unknown'}`,
-            email: `${a?.username || 'admin'}@local`,
-            name: a?.username || 'Admin',
-            role: 'admin',
-          };
-          setUserAndCache(mapped);
-          return;
-        } catch {}
+      // 3) admin
+      try {
+        const a = await api('/admin/me');
+        setUserAndCache(mapAdminMe(a));
+        return;
+      } catch {}
 
-        // tidak login
-        setUserAndCache(null);
-      } finally {
-        setLoading(false);
-      }
-    })();
+      setUserAndCache(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // restore saat mount
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== Signin (user / admin fallback) =====
+  /* ================= Actions ================= */
+
+  // kandidat / admin fallback
   const signin: AuthCtx['signin'] = async (identifier, password) => {
     if (identifier.includes('@')) {
+      // coba kandidat dulu
       try {
-        const u: any = await api('/auth/signin', { json: { email: identifier, password } });
-        const mapped: UserLite = { ...u, role: 'user' };
+        const u = await api('/auth/signin', { json: { email: identifier, password } });
+        const mapped = mapCandidateMe(u);
         setUserAndCache(mapped);
         return mapped;
       } catch {
-        const a: any = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
-        const mapped: UserLite = {
-          id: a?.admin?.id || `admin:${identifier}`,
-          email: identifier,
-          name: a?.admin?.username || 'Admin',
-          role: 'admin',
-        };
+        // fallback admin (boleh email/username)
+        const a = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
+        const mapped = mapAdminMe(a);
         setUserAndCache(mapped);
         return mapped;
       }
     }
-    // tidak ada '@' → anggap admin
-    const a: any = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
-    const mapped: UserLite = {
-      id: a?.admin?.id || `admin:${identifier}`,
-      email: `${identifier}@local`,
-      name: a?.admin?.username || 'Admin',
-      role: 'admin',
-    };
+    // tidak mengandung '@' → anggap admin
+    const a = await api('/admin/signin', { json: { usernameOrEmail: identifier, password } });
+    const mapped = mapAdminMe(a);
     setUserAndCache(mapped);
     return mapped;
   };
 
-  // ===== Employer signin =====
-  const signinEmployer: AuthCtx['signinEmployer'] = async (usernameOrEmail, password) => {
-    const resp: any = await api('/api/employers/auth/signin', {
-      json: { usernameOrEmail, password },
-    });
-    const mapped: UserLite = {
-      id: resp?.admin?.id || 'unknown',
-      email: resp?.admin?.email,
-      name: resp?.admin?.fullName || resp?.employer?.displayName || 'Employer',
-      role: 'employer',
-      employer: resp?.employer
-        ? { id: resp.employer.id, slug: resp.employer.slug, displayName: resp.employer.displayName }
-        : null,
-    };
-    setUserAndCache(mapped);
-    return mapped;
-  };
-
-  // ===== Signup user (kandidat) =====
   const signup: AuthCtx['signup'] = async (name, email, password) => {
-    const u: any = await api('/auth/signup', { json: { name, email, password } });
-    const mapped: UserLite = { ...u, role: 'user' };
+    const u = await api('/auth/signup', { json: { name, email, password } });
+    const mapped = mapCandidateMe(u);
     setUserAndCache(mapped);
     return mapped;
   };
 
-  // ===== Signout (bersihkan semua kemungkinan token) =====
+  const signinEmployer: AuthCtx['signinEmployer'] = async (usernameOrEmail, password) => {
+    const resp = await api('/api/employers/auth/signin', { json: { usernameOrEmail, password } });
+    const mapped = mapEmployerMe(resp);
+    setUserAndCache(mapped);
+    return mapped;
+  };
+
   const signout = async () => {
-    try { await api('/api/employers/auth/signout', { method: 'POST', expectJson: false }); } catch {}
-    try { await api('/auth/signout', { method: 'POST', expectJson: false }); } catch {}
-    try { await api('/admin/signout', { method: 'POST', expectJson: false }); } catch {}
+    try {
+      await api('/api/employers/auth/signout', { method: 'POST', expectJson: false });
+    } catch {}
+    try {
+      await api('/auth/signout', { method: 'POST', expectJson: false });
+    } catch {}
+    try {
+      await api('/admin/signout', { method: 'POST', expectJson: false });
+    } catch {}
     clearSnapshot();
-    persistEmployerId(null);
     setUser(null);
   };
 
   const value = useMemo<AuthCtx>(
-    () => ({ user, loading, signin, signup, signinEmployer, signout }),
+    () => ({ user, loading, signin, signup, signinEmployer, signout, refresh }),
     [user, loading]
   );
 

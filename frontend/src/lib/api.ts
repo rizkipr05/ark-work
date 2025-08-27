@@ -1,30 +1,35 @@
 // frontend/src/lib/api.ts
 
-export const API_BASE =
+/* ====================== Base URL ====================== */
+const RAW_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE ||
   'http://localhost:4000';
 
+// hapus trailing slash supaya join URL konsisten
+export const API_BASE = RAW_BASE.replace(/\/+$/, '');
+
+/* ====================== Types ====================== */
 type ApiOpts = RequestInit & {
-  /** Body sebagai JSON (auto set method=POST, body=JSON.stringify) */
+  /** Kalau diisi, otomatis method POST (kecuali diset manual) dan body = JSON.stringify(json) */
   json?: any;
-  /** Kalau false atau 204, fungsi mengembalikan null */
-  expectJson?: boolean; // default true
+  /** Kalau false atau server 204, fungsi return null */
+  expectJson?: boolean; // default: true
 };
 
-/** Gabungkan base + path dengan aman */
+/* ====================== URL helpers ====================== */
 function buildUrl(path: string) {
   if (!path) return API_BASE;
-  if (/^https?:\/\//i.test(path)) return path;
+  if (/^https?:\/\//i.test(path)) return path; // sudah absolut
   return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-/** Ambil pesan error paling masuk akal dari response */
+/* ====================== Error helpers ====================== */
 async function readErrorMessage(res: Response) {
   try {
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
-      const data: any = await res.json();
+      const data: any = await res.json().catch(() => ({}));
       return data?.message || data?.error || `HTTP ${res.status}`;
     }
     const text = await res.text();
@@ -34,8 +39,8 @@ async function readErrorMessage(res: Response) {
   }
 }
 
+/* ====================== Main fetch wrapper ====================== */
 /**
- * Wrapper fetch utama (cookie ikut).
  * Contoh:
  *   await api('/admin/signin', { json: { username, password } })
  *   const me = await api('/admin/me')
@@ -50,36 +55,42 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
   if (willSendJson) h.set('Content-Type', 'application/json');
 
   const init: RequestInit = {
-    credentials: 'include', // ⬅️ penting agar emp_token ikut
+    credentials: 'include', // penting agar cookie/token ikut
     headers: h,
     ...(json !== undefined ? { method: rest.method ?? 'POST', body: JSON.stringify(json) } : {}),
     ...rest,
   };
 
-  const res = await fetch(buildUrl(path), init);
+  const url = buildUrl(path);
+  const res = await fetch(url, init);
 
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    // lempar error lengkap (status + URL + pesan server)
+    throw new Error(`[${res.status}] ${url} ${await readErrorMessage(res)}`);
   }
 
   if (res.status === 204 || !expectJson) {
-    // @ts-expect-error
+    // @ts-expect-error – agar bisa return null saat expectJson=false
     return null;
   }
 
-  // Jangan paksa parse JSON kalau server tidak kirim JSON
+  // jangan memaksa parse JSON kalau server tidak kirim JSON
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
-    
-    return (await res.text()) as T;
+    return (await res.text()) as unknown as T;
   }
 
-  return res.json() as Promise<T>;
+  return (await res.json()) as T;
 }
 
 /* =================== Helper khusus FormData / Upload =================== */
-export async function apiForm<T = any>(path: string, form: FormData, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(buildUrl(path), {
+export async function apiForm<T = any>(
+  path: string,
+  form: FormData,
+  opts: RequestInit = {}
+): Promise<T> {
+  const url = buildUrl(path);
+  const res = await fetch(url, {
     method: 'POST',
     body: form,
     credentials: 'include',
@@ -87,7 +98,7 @@ export async function apiForm<T = any>(path: string, form: FormData, opts: Reque
   });
 
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    throw new Error(`[${res.status}] ${url} ${await readErrorMessage(res)}`);
   }
 
   const ct = res.headers.get('content-type') || '';
@@ -95,7 +106,7 @@ export async function apiForm<T = any>(path: string, form: FormData, opts: Reque
     // @ts-expect-error
     return null;
   }
-  return res.json() as Promise<T>;
+  return (await res.json()) as T;
 }
 
 /* ================== Energy News (Google News RSS → rss2json) ================= */
@@ -134,7 +145,9 @@ function getDomain(url?: string): string {
     if (!url) return '';
     const u = new URL(url);
     return u.hostname.replace(/^www\./, '');
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
 
 function buildGoogleNewsRssUrl(params: { q: string; lang: string; country: string }) {
@@ -151,17 +164,32 @@ async function fetchRssAsJson(rssUrl: string) {
   if (!res.ok) throw new Error(`RSS fetch failed: ${res.status} ${res.statusText}`);
   return res.json() as Promise<{
     items: Array<{
-      title: string; link: string; pubDate?: string; author?: string;
-      description?: string; content?: string; enclosure?: { link?: string };
+      title: string;
+      link: string;
+      pubDate?: string;
+      author?: string;
+      description?: string;
+      content?: string;
+      enclosure?: { link?: string };
     }>;
   }>;
 }
 
 function buildQuery(baseKeywords?: string) {
-  const defaults = ['oil','gas','energy','petroleum','geothermal','renewable','minyak','energi','migas'];
-  const extra = (baseKeywords || '').split(',').map(s => s.trim()).filter(Boolean);
+  const defaults = [
+    'oil',
+    'gas',
+    'energy',
+    'petroleum',
+    'geothermal',
+    'renewable',
+    'minyak',
+    'energi',
+    'migas',
+  ];
+  const extra = (baseKeywords || '').split(',').map((s) => s.trim()).filter(Boolean);
   const all = Array.from(new Set([...defaults, ...extra]));
-  return all.map(k => `"${k}"`).join(' OR ');
+  return all.map((k) => `"${k}"`).join(' OR ');
 }
 
 function extractImageFromHtml(html?: string): string | null {
@@ -203,7 +231,7 @@ export async function fetchEnergyNews(params: FetchEnergyNewsParams): Promise<En
     urls.push(buildGoogleNewsRssUrl({ q, lang, country }));
   }
 
-  const results = await Promise.allSettled(urls.map(u => fetchRssAsJson(u)));
+  const results = await Promise.allSettled(urls.map((u) => fetchRssAsJson(u)));
   const items: EnergyNewsItem[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled') {
@@ -211,14 +239,19 @@ export async function fetchEnergyNews(params: FetchEnergyNewsParams): Promise<En
     }
   }
 
+  // de-dupe berdasarkan link/title
   const seen = new Set<string>();
-  const deduped = items.filter(it => {
+  const deduped = items.filter((it) => {
     const key = it.link || it.title;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 
-  deduped.sort((a, b) => (+(b.pubDate ? new Date(b.pubDate) : 0) - +(a.pubDate ? new Date(a.pubDate) : 0)));
+  // sort by pubDate desc
+  deduped.sort(
+    (a, b) => +(b.pubDate ? new Date(b.pubDate) : 0) - +(a.pubDate ? new Date(a.pubDate) : 0)
+  );
+
   return { items: deduped.slice(0, Math.max(1, limit)) };
 }

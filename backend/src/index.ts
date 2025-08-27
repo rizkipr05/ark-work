@@ -16,7 +16,7 @@ import employerAuthRouter from './routes/employer-auth';
 import adminPlansRouter from './routes/admin-plans';
 import paymentsRouter from './routes/payments';
 
-// Role guards (kalau dipakai)
+// Role guards (optional)
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
 
 const app = express();
@@ -36,17 +36,14 @@ if (NODE_ENV === 'production') {
 }
 
 /* --------------------------------- CORS --------------------------------- */
-// Build daftar origin yang diizinkan
 const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 const envAllowed = FRONTEND_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
 const allowedOrigins = Array.from(new Set([...defaultAllowed, ...envAllowed]));
 
 const corsOptions: cors.CorsOptions = {
   origin(origin, cb) {
-    // izinkan request tanpa origin (server-to-server / curl / health check)
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // server-to-server / tools
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Boleh tambahkan pattern vercel preview dsb di sini bila perlu
     return cb(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
@@ -54,13 +51,10 @@ const corsOptions: cors.CorsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-// CORS harus dipasang PALING AWAL (sebelum parser & routes)
 app.use(cors(corsOptions));
-// Tangani preflight untuk semua rute
 app.options('*', cors(corsOptions));
 
 /* ----------------------------- Basic middlewares ----------------------------- */
-// log ringkas
 app.use((req: Request, _res: Response, next: NextFunction) => {
   console.log(`${req.method} ${req.originalUrl}`);
   next();
@@ -70,7 +64,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: '2mb' })); // JSON only (webhook payments juga JSON)
 
 /* -------------------------------- Static -------------------------------- */
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// ⬅️ penting: serve dari public/uploads (bukan uploads di root)
+app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
 /* -------------------------------- Health -------------------------------- */
 app.get('/', (_req, res) => res.send('OK'));
@@ -147,7 +142,6 @@ function startServer(startPort: number, maxTries = 10) {
     }
   });
 
-  // graceful shutdown
   process.on('SIGINT', () => {
     console.log('\nShutting down...');
     server.close(() => process.exit(0));

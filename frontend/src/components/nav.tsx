@@ -288,9 +288,7 @@ export default function Nav() {
                 <Avatar src={photoURL} alt={displayName} size={32} />
                 <div className="hidden sm:flex flex-col max-w-[180px] text-left">
                   <span className="truncate text-sm font-semibold text-neutral-800 dark:text-neutral-100">{displayName}</span>
-                  {isEmployer && email && (
-                    <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">{email}</span>
-                  )}
+                 
                 </div>
                 <ChevronDownIcon className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`} />
               </button>

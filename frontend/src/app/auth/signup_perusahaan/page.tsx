@@ -193,7 +193,6 @@ function readPayments(): PaymentRecord[] {
 }
 function writePayments(arr: PaymentRecord[]) {
   localStorage.setItem(LS_PAYMENTS_KEY, JSON.stringify(arr));
-  // trigger listener di halaman admin (beberapa kanal supaya kompatibel)
   try {
     new BroadcastChannel('ark_payments').postMessage({ type: 'payment:new' });
   } catch {}
@@ -229,7 +228,13 @@ export default function Page() {
       setSiBusy(true);
       setError(null);
 
-      await signinEmployer(siEmail.trim(), siPw); // isi context → Nav berubah
+      // Jika useAuth.signinEmployer mengembalikan data employer, ambil employerId di sana.
+      // Misal: const { employerId } = await signinEmployer(siEmail.trim(), siPw);
+      await signinEmployer(siEmail.trim(), siPw);
+
+      // OPTIONAL: kalau signinEmployer mengembalikan employerId:
+      // localStorage.setItem('ark_employer_id', employerId);
+
       router.replace('/employer');
       router.refresh();
     } catch (err: any) {
@@ -243,6 +248,13 @@ export default function Page() {
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
   const [employerId, setEmployerId] = useState<string | null>(null);
+
+  // Simpan ke localStorage otomatis bila employerId berubah (hasil step1)
+  useEffect(() => {
+    if (employerId) {
+      localStorage.setItem('ark_employer_id', employerId);
+    }
+  }, [employerId]);
 
   // status pembayaran
   const [paid, setPaid] = useState(false);
@@ -292,7 +304,10 @@ export default function Page() {
         }
       );
 
+      // ✅ Simpan employerId ke state & localStorage
       setEmployerId(resp.employerId);
+      localStorage.setItem('ark_employer_id', resp.employerId);
+
       setStep(2);
       setMode('signup');
     } catch (err: unknown) {
@@ -593,7 +608,12 @@ export default function Page() {
       // ====== LOGIN OTOMATIS (OPSI 5) ======
       const loginEmail = (profile.email || email).trim();
       if (!loginEmail) throw new Error('Email tidak tersedia untuk login otomatis.');
+
+      // Jika signinEmployer mengembalikan employerId, kamu bisa set localStorage di sana.
       await signinEmployer(loginEmail, pw);
+
+      // Pastikan localStorage employer id tetap ada
+      if (employerId) localStorage.setItem('ark_employer_id', employerId);
 
       router.replace('/employer');
       router.refresh();
@@ -1129,7 +1149,9 @@ export default function Page() {
                               <h3 className={cx('text-base sm:text-lg font-semibold', active ? 'text-blue-700' : 'text-slate-900')}>
                                 {p.name}
                               </h3>
-                              <div className={cx('text-sm', active ? 'text-blue-600' : 'text-slate-500')}>{formatIDR(p.amount)}</div>
+                              <div className={cx('text-sm', active ? 'text-blue-600' : 'text-slate-500')}>
+                                {formatIDR(p.amount)}
+                              </div>
                             </div>
                             <div className="mt-1 text-xs text-slate-500">/{p.interval}</div>
                             <ul className="mt-3 space-y-2 text-sm text-slate-600">

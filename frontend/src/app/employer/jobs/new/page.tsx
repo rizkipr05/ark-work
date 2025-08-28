@@ -450,7 +450,7 @@ export default function NewJobPage() {
               onChange={(e) => set('isDraft', e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-blue-600"
             />
-            Save as draft
+            Save as draft (server)
           </label>
 
           {/* Actions */}

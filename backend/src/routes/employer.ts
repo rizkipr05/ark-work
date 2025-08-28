@@ -1,5 +1,5 @@
 // src/routes/employer.ts
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { parse as parseCookie } from 'cookie';
 import path from 'node:path';
@@ -20,6 +20,25 @@ import {
 import { prisma } from '../lib/prisma';
 
 export const employerRouter = Router();
+
+/* ================== TYPE AUGMENTATION ================== */
+declare module 'express-serve-static-core' {
+  interface Request {
+    employerId?: string | null;
+  }
+}
+
+/* ================== MIDDLEWARE attachEmployerId ================== */
+export function attachEmployerId(req: Request, _res: Response, next: NextFunction) {
+  const fromSession = (req as any)?.session?.employerId as string | undefined;
+  const fromHeader = (req.headers['x-employer-id'] as string | undefined)?.trim();
+  const fromBody   = (req.body?.employerId as string | undefined)?.trim();
+  const fromQuery  = (req.query?.employerId as string | undefined)?.trim();
+  const fromEnv    = process.env.DEV_EMPLOYER_ID;
+
+  req.employerId = fromSession || fromHeader || fromBody || fromQuery || fromEnv || null;
+  next();
+}
 
 /* ================== AUTH HELPERS (pakai emp_token) ================== */
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -47,7 +66,6 @@ function getEmployerAuth(req: Request): { adminUserId: string; employerId: strin
 }
 
 /* ================== MULTER (upload logo) ================== */
-// ⬇⬇⬇ simpan ke /uploads, sama seperti static server di index.ts
 const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'employers');
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -59,6 +77,7 @@ const storage = multer.diskStorage({
     cb(null, name);
   },
 });
+
 const upload = multer({
   storage,
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
@@ -67,9 +86,15 @@ const upload = multer({
     cb(null, true);
   },
 });
+
 type MulterReq = Request & { file?: Express.Multer.File };
 
-/* ================== ALUR 5 STEP SIGNUP EMPLOYER ================== */
+/* ================== ROUTES ================== */
+
+// gunakan attachEmployerId untuk semua route yang butuh employerId
+employerRouter.use(attachEmployerId);
+
+/* --------- STEP SIGNUP 1-5 --------- */
 
 employerRouter.get('/availability', async (req, res, next) => {
   try {
@@ -159,7 +184,7 @@ employerRouter.post('/step5', async (req, res, next) => {
   }
 });
 
-/* ================== ENDPOINT SESI/UTILITY UNTUK FE ================== */
+/* --------- EMPLOYER UTILITY --------- */
 
 employerRouter.get('/me', async (req: Request, res: Response) => {
   const auth = getEmployerAuth(req);
@@ -175,10 +200,10 @@ employerRouter.get('/me', async (req: Request, res: Response) => {
 });
 
 employerRouter.get('/profile', async (req, res) => {
-  const employerId = (req.query.employerId as string) || '';
+  const employerId = req.employerId;
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
-  const p = await prisma.employerProfile.findUnique({
+  const profile = await prisma.employerProfile.findUnique({
     where: { employerId },
     select: {
       about: true,
@@ -195,18 +220,18 @@ employerRouter.get('/profile', async (req, res) => {
       updatedAt: true,
     },
   });
-  return res.json(p || {});
+  return res.json(profile || {});
 });
 
 employerRouter.post('/update-basic', async (req, res) => {
-  const { employerId, displayName, legalName, website } = req.body || {};
+  const employerId = req.employerId;
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
+  const { displayName, legalName, website } = req.body || {};
   const data: any = {};
   if (typeof displayName === 'string') data.displayName = displayName.trim();
   if (typeof legalName === 'string') data.legalName = legalName.trim();
   if (typeof website === 'string' || website === null) data.website = website || null;
-
   if (!Object.keys(data).length) return res.json({ ok: true });
 
   const updated = await prisma.employer.update({
@@ -219,7 +244,7 @@ employerRouter.post('/update-basic', async (req, res) => {
 
 employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => {
   const mreq = req as MulterReq;
-  const employerId = (mreq.body?.employerId || '').trim();
+  const employerId = req.employerId;
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
   if (!mreq.file) return res.status(400).json({ message: 'file required' });
 
@@ -234,25 +259,28 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
   return res.json({ ok: true, url: publicUrl });
 });
 
-/* ========= contoh dummy ========= */
+/* --------- DUMMY ENDPOINTS --------- */
 employerRouter.get('/stats', async (req, res) => {
-  const auth = getEmployerAuth(req);
-  if (!auth) return res.status(401).json({ message: 'Unauthorized' });
+  const employerId = req.employerId;
+  if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json({
-    activeJobs: 0, totalApplicants: 0, interviews: 0, views: 0,
+    activeJobs: 0,
+    totalApplicants: 0,
+    interviews: 0,
+    views: 0,
     lastUpdated: new Date().toISOString(),
   });
 });
 
 employerRouter.get('/jobs', async (req, res) => {
-  const auth = getEmployerAuth(req);
-  if (!auth) return res.status(401).json({ message: 'Unauthorized' });
+  const employerId = req.employerId;
+  if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json([]);
 });
 
 employerRouter.get('/applications', async (req, res) => {
-  const auth = getEmployerAuth(req);
-  if (!auth) return res.status(401).json({ message: 'Unauthorized' });
+  const employerId = req.employerId;
+  if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json([]);
 });
 

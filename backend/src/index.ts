@@ -4,41 +4,32 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import http from 'node:http';
+import morgan from 'morgan';
 
-// Routers (perhatikan mana default dan mana named)
+// Routers
 import authRouter from './routes/auth';
 import newsRouter from './routes/news';
 import chatRouter from './routes/chat';
 import adminRouter from './routes/admin';
-import { employerRouter } from './routes/employer'; // <-- ini memang named
+import { employerRouter } from './routes/employer';
 import employerAuthRouter from './routes/employer-auth';
 import adminPlansRouter from './routes/admin-plans';
 import paymentsRouter from './routes/payments';
 import tendersRouter from './routes/tenders';
-import adminTendersRouter from './routes/admin-tenders'; // <-- DEFAULT IMPORT (perbaikan)
+import adminTendersRouter from './routes/admin-tenders';
+import { jobsRouter } from './routes/jobs';
 
 // Role guards (optional)
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
 
 const app = express();
-
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const DEFAULT_PORT = Number(process.env.PORT || 4000);
 
-/**
- * FRONTEND_ORIGIN bisa koma separated, contoh:
- * FRONTEND_ORIGIN=http://localhost:3000,http://127.0.0.1:3000
- */
+/* ---------------------------- FRONTEND ORIGIN ---------------------------- */
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-
-if (NODE_ENV === 'production') {
-  // agar Express membaca IP asli di belakang proxy (Heroku/Render/Nginx)
-  app.set('trust proxy', 1);
-}
-
-/* --------------------------------- CORS --------------------------------- */
 const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000'];
-const envAllowed = FRONTEND_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
+const envAllowed = FRONTEND_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
 const allowedOrigins = Array.from(new Set([...defaultAllowed, ...envAllowed]));
 
 const corsOptions: cors.CorsOptions = {
@@ -49,57 +40,64 @@ const corsOptions: cors.CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id'],
 };
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-/* ----------------------------- Basic middlewares ----------------------------- */
+/* --------------------------- Basic Middlewares --------------------------- */
+if (NODE_ENV === 'production') app.set('trust proxy', 1);
+
+app.use(morgan('dev'));
+app.use(express.json({ limit: '5mb' }));
+app.use(cookieParser());
+
+// Simple request logger
 app.use((req: Request, _res: Response, next: NextFunction) => {
   console.log(`${req.method} ${req.originalUrl}`);
   next();
 });
 
-app.use(cookieParser());
-app.use(express.json({ limit: '2mb' })); // JSON only (webhook payments juga JSON)
-
-/* -------------------------------- Static -------------------------------- */
-// serve static dari public/uploads
+// Serve static files (public/uploads)
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
-/* -------------------------------- Health -------------------------------- */
+/* ------------------------------ Health Checks ----------------------------- */
 app.get('/', (_req, res) => res.send('OK'));
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, status: 'healthy' }));
 
-/* -------------------------------- Routes -------------------------------- */
+/* --------------------------------- Routes --------------------------------- */
 // Auth kandidat/user
 app.use('/auth', authRouter);
 
-// Admin auth / dasar (kalau ada)
+// Admin auth / dashboard
 app.use('/admin', adminRouter);
 
-// News & Chat API
+// News & Chat
 app.use('/api/news', newsRouter);
 app.use('/api/chat', chatRouter);
 
-// Tenders publik (list untuk user)
+// Tenders (public)
 app.use('/api/tenders', tendersRouter);
 
-// Admin manage tenders (CRUD admin)
-app.use('/admin/tenders', adminTendersRouter); // <-- perbaikan di sini
+// Admin manage tenders
+app.use('/admin/tenders', adminTendersRouter);
 
 // Employer auth (signup/signin/signout/me)
 app.use('/api/employers/auth', employerAuthRouter);
 
-// Employer features (step1–5, profile, dsb.)
+// Employer features (step1–5, profile, etc.)
 app.use('/api/employers', employerRouter);
 
 // Admin plans & payments
 app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
 
-/* ------------------------- Contoh protected endpoints ------------------------ */
+// Jobs API
+app.use('/api', jobsRouter);
+
+/* -------------------------- Protected Examples --------------------------- */
 app.get('/api/profile', authRequired, (req, res) => {
   res.json({ ok: true, whoami: (req as any).auth });
 });
@@ -112,10 +110,10 @@ app.post('/api/admin/stats', adminRequired, (req, res) => {
   res.json({ ok: true, message: 'Admin-only area', whoami: (req as any).auth });
 });
 
-/* --------------------------------- 404 last -------------------------------- */
+/* --------------------------------- 404 ----------------------------------- */
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-/* ------------------------------ Error handler ------------------------------ */
+/* ----------------------------- Error Handler ----------------------------- */
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled error:', err);
   if (err instanceof Error && err.message.startsWith('Not allowed by CORS')) {
@@ -124,7 +122,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-/* ------------------------------ Listen server ------------------------------ */
+/* --------------------------- Start Server w/ Port Fallback --------------------------- */
 function startServer(startPort: number, maxTries = 10) {
   let port = startPort;
   let tries = 0;

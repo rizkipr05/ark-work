@@ -28,18 +28,6 @@ declare module 'express-serve-static-core' {
   }
 }
 
-/* ================== MIDDLEWARE attachEmployerId ================== */
-export function attachEmployerId(req: Request, _res: Response, next: NextFunction) {
-  const fromSession = (req as any)?.session?.employerId as string | undefined;
-  const fromHeader = (req.headers['x-employer-id'] as string | undefined)?.trim();
-  const fromBody   = (req.body?.employerId as string | undefined)?.trim();
-  const fromQuery  = (req.query?.employerId as string | undefined)?.trim();
-  const fromEnv    = process.env.DEV_EMPLOYER_ID;
-
-  req.employerId = fromSession || fromHeader || fromBody || fromQuery || fromEnv || null;
-  next();
-}
-
 /* ================== AUTH HELPERS (pakai emp_token) ================== */
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
@@ -65,16 +53,57 @@ function getEmployerAuth(req: Request): { adminUserId: string; employerId: strin
   }
 }
 
+/* ================== MIDDLEWARE attachEmployerId ================== */
+export function attachEmployerId(req: Request, _res: Response, next: NextFunction) {
+  const fromSession = (req as any)?.session?.employerId as string | undefined;
+  const fromHeader = (req.headers['x-employer-id'] as string | undefined)?.trim();
+  const fromQuery  = (req.query?.employerId as string | undefined)?.trim();
+  const fromEnv    = process.env.DEV_EMPLOYER_ID;
+
+  // 🔑 penting: ambil juga dari cookie emp_token
+  const fromCookie = getEmployerAuth(req)?.employerId;
+
+  req.employerId =
+    fromSession ||
+    fromHeader ||
+    fromQuery ||
+    fromCookie ||
+    fromEnv ||
+    null;
+
+  next();
+}
+
 /* ================== MULTER (upload logo) ================== */
-const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'employers');
-fs.mkdirSync(uploadDir, { recursive: true });
+/** ROOT upload di-serve oleh index.ts: app.use('/uploads', express.static('public/uploads')) */
+const uploadsRoot = path.join(process.cwd(), 'public', 'uploads');
+fs.mkdirSync(uploadsRoot, { recursive: true });
+
+/** Ambil employerId yang paling mungkin (untuk multer storage) */
+function pickEmployerIdForStorage(req: Request): string {
+  // attachEmployerId sudah jalan sebelum route ini → req.employerId biasanya terisi
+  const fromAttach = (req.employerId as string | null) || undefined;
+
+  // header bisa dipakai pada multipart
+  const fromHeader = (req.headers['x-employer-id'] as string | undefined)?.trim();
+
+  // cookie juga aman dipakai sebelum body diparse
+  const fromCookie = getEmployerAuth(req)?.employerId;
+
+  // kalau semua gagal, fallback "unknown" (nanti akan ditolak di handler)
+  return fromAttach || fromHeader || fromCookie || 'unknown';
+}
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (req, _file, cb) => {
+    const eid = pickEmployerIdForStorage(req);
+    const dir = path.join(uploadsRoot, 'employers', eid);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const name = `logo_${Date.now()}${ext || '.png'}`;
-    cb(null, name);
+    const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+    cb(null, 'logo' + ext);
   },
 });
 
@@ -82,7 +111,9 @@ const upload = multer({
   storage,
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
   fileFilter: (_req, file, cb) => {
-    if (!/^image\//.test(file.mimetype)) return cb(new Error('Invalid file type'));
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype)) {
+      return cb(new Error('Only PNG/JPG/WebP allowed'));
+    }
     cb(null, true);
   },
 });
@@ -187,6 +218,7 @@ employerRouter.post('/step5', async (req, res, next) => {
 /* --------- EMPLOYER UTILITY --------- */
 
 employerRouter.get('/me', async (req: Request, res: Response) => {
+  // kalau kamu ingin mengembalikan juga admin email, tinggal join tabel di sini
   const auth = getEmployerAuth(req);
   if (!auth) return res.status(401).json({ message: 'Unauthorized' });
 
@@ -196,11 +228,11 @@ employerRouter.get('/me', async (req: Request, res: Response) => {
   });
   if (!employer) return res.status(404).json({ message: 'Employer not found' });
 
-  return res.json({ employer });
+  return res.json({ employer, admin: { id: auth.adminUserId, email: null } });
 });
 
 employerRouter.get('/profile', async (req, res) => {
-  const employerId = req.employerId;
+  const employerId = req.employerId || getEmployerAuth(req)?.employerId || (req.query?.employerId as string | undefined);
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
   const profile = await prisma.employerProfile.findUnique({
@@ -224,7 +256,7 @@ employerRouter.get('/profile', async (req, res) => {
 });
 
 employerRouter.post('/update-basic', async (req, res) => {
-  const employerId = req.employerId;
+  const employerId = req.employerId || getEmployerAuth(req)?.employerId || (req.body?.employerId as string | undefined);
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
 
   const { displayName, legalName, website } = req.body || {};
@@ -242,13 +274,34 @@ employerRouter.post('/update-basic', async (req, res) => {
   return res.json({ ok: true, employer: updated });
 });
 
+/* ------------------------- UPLOAD LOGO (IMPORTANT) ------------------------- */
+// FULL URL: POST http://localhost:4000/api/employers/profile/logo
 employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => {
   const mreq = req as MulterReq;
-  const employerId = req.employerId;
+
+  // setelah multer, req.body untuk fields lain sudah tersedia
+  const employerId =
+    req.employerId ||
+    (mreq.body?.employerId as string | undefined) ||
+    getEmployerAuth(req)?.employerId ||
+    null;
+
   if (!employerId) return res.status(400).json({ message: 'employerId required' });
   if (!mreq.file) return res.status(400).json({ message: 'file required' });
 
-  const publicUrl = `/uploads/employers/${mreq.file.filename}`;
+  // Pastikan file tersimpan di folder milik employerId (storage sudah mengarah ke folder itu)
+  const dir = path.join(uploadsRoot, 'employers', employerId);
+  if (!fs.existsSync(dir)) {
+    // ini edge case kalau storage sempat fallback ke "unknown"
+    fs.mkdirSync(dir, { recursive: true });
+    // pindahkan file
+    const from = path.join(uploadsRoot, 'employers', 'unknown', mreq.file.filename);
+    const to   = path.join(dir, mreq.file.filename);
+    try { fs.renameSync(from, to); } catch {}
+  }
+
+  // URL publik
+  const publicUrl = `/uploads/employers/${employerId}/${mreq.file.filename}`;
 
   await prisma.employerProfile.upsert({
     where: { employerId },
@@ -261,7 +314,7 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
 
 /* --------- DUMMY ENDPOINTS --------- */
 employerRouter.get('/stats', async (req, res) => {
-  const employerId = req.employerId;
+  const employerId = req.employerId || getEmployerAuth(req)?.employerId;
   if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json({
     activeJobs: 0,
@@ -273,13 +326,13 @@ employerRouter.get('/stats', async (req, res) => {
 });
 
 employerRouter.get('/jobs', async (req, res) => {
-  const employerId = req.employerId;
+  const employerId = req.employerId || getEmployerAuth(req)?.employerId;
   if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json([]);
 });
 
 employerRouter.get('/applications', async (req, res) => {
-  const employerId = req.employerId;
+  const employerId = req.employerId || getEmployerAuth(req)?.employerId;
   if (!employerId) return res.status(401).json({ message: 'Unauthorized' });
   res.json([]);
 });

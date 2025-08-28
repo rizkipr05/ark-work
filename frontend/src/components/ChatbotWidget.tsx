@@ -19,7 +19,10 @@ type Profile = {
 /* ===================== Consts ===================== */
 const STORAGE_KEY = 'ogm-chat-history-v1';
 const PROFILE_KEY = 'ogm-chat-profile-v1';
-const DEFAULT_CHAT_API = '/api/chat';
+const DEFAULT_CHAT_API =
+  (process.env.NEXT_PUBLIC_API_BASE
+    ? `${process.env.NEXT_PUBLIC_API_BASE}/api/chat`
+    : '/api/chat');
 
 /* ===================== Utils ===================== */
 function formatTime(ts: number) {

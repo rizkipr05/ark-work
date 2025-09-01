@@ -127,9 +127,7 @@ export default function Nav() {
   );
   const employerLinks = useMemo(
     () => [
-      { href: '/employer/jobs/new', label: t('emp.postJob', { defaultMessage: 'Post a Job' }) },
       { href: '/employer/jobs', label: t('emp.manageJobs', { defaultMessage: 'Manage Jobs' }) },
-      { href: '/employer/applications', label: t('emp.applications', { defaultMessage: 'Applications' }) },
       { href: '/employer/billing', label: t('emp.billing', { defaultMessage: 'Billing' }) },
       { href: '/employer/settings', label: t('emp.settings', { defaultMessage: 'Settings' }) },
     ],

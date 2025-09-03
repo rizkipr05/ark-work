@@ -224,7 +224,7 @@ export default function Nav() {
     <nav className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200/60 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-neutral-800 dark:bg-neutral-950/60">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-2" aria-label="ArkWork Home">
-          <Image src={ArkLogo} alt="ArkWork" width={200} height={200} priority className="h-24 w-auto object-contain" />
+          <Image src={ArkLogo} alt="ArkWork" width={300} height={300} priority className="h-24 w-auto object-contain" />
         </Link>
 
         {/* Desktop menu */}

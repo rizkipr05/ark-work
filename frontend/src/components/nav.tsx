@@ -40,7 +40,6 @@ function findEmailDeep(obj: unknown, depth = 0): string | undefined {
   }
   if (typeof obj === 'object' && obj) {
     const rec = obj as Record<string, unknown>;
-    // prioritas jika key mengandung "email"
     for (const k of Object.keys(rec)) {
       const v = rec[k];
       if (typeof v === 'string' && /email/i.test(k) && EMAIL.test(v.trim())) return v.trim();
@@ -225,7 +224,7 @@ export default function Nav() {
     <nav className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200/60 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-neutral-800 dark:bg-neutral-950/60">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-2" aria-label="ArkWork Home">
-          <Image src={ArkLogo} alt="ArkWork" width={200} height={200} priority className="h-20 w-auto object-contain" />
+          <Image src={ArkLogo} alt="ArkWork" width={200} height={200} priority className="h-24 w-auto object-contain" />
         </Link>
 
         {/* Desktop menu */}
@@ -286,7 +285,6 @@ export default function Nav() {
                 <Avatar src={photoURL} alt={displayName} size={32} />
                 <div className="hidden sm:flex flex-col max-w-[180px] text-left">
                   <span className="truncate text-sm font-semibold text-neutral-800 dark:text-neutral-100">{displayName}</span>
-                 
                 </div>
                 <ChevronDownIcon className={`h-4 w-4 text-neutral-500 transition ${menuOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -324,7 +322,6 @@ export default function Nav() {
                       {isEmployer
                         ? t('emp.dashboard', { defaultMessage: 'Employer Dashboard' })
                         : t('user.dashboard', { defaultMessage: 'Dashboard' })}
-
                     </span>
                   </MenuItem>
 
@@ -378,9 +375,24 @@ export default function Nav() {
         aria-modal="true"
       >
         <div className="relative m-3 ms-auto h-[calc(100vh-1.5rem)] w-full overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-950">
+          {/* Header drawer mobile */}
           <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <div className="flex items-center gap-3">
-              <Image src={ArkLogo} alt="ArkWork" width={120} height={120} priority className="h-10 w-auto object-contain md:h-12" />
+              {mounted && !loading && isLoggedIn ? (
+                <>
+                  <Avatar src={photoURL} alt={displayName} size={36} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                      {displayName}
+                    </div>
+                    {!!email && (
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{email}</div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <Image src={ArkLogo} alt="ArkWork" width={120} height={120} priority className="h-10 w-auto object-contain md:h-12" />
+              )}
             </div>
             <button
               onClick={() => setOpen(false)}
@@ -394,6 +406,7 @@ export default function Nav() {
 
           <div className="flex h-[calc(100%-7.5rem)] flex-col">
             <nav className="flex-1 overflow-y-auto px-3 py-2">
+              {/* Primary nav */}
               <ul className="space-y-1">
                 {links.map(({ href, label, icon: Icon }) => {
                   const active = pathname === href;
@@ -419,38 +432,92 @@ export default function Nav() {
 
               <hr className="my-4 border-neutral-200 dark:border-neutral-800" />
 
+              {/* Auth area (mobile) */}
               {!mounted || loading ? (
                 <div className="h-10 w-full rounded-xl bg-neutral-200 animate-pulse dark:bg-neutral-800" />
               ) : !isLoggedIn ? (
                 <div className="grid grid-cols-2 gap-2">
-                  <Link href="/auth/signin" onClick={() => setOpen(false)} className="rounded-xl border border-blue-600 px-3 py-2 text-center text-sm font-medium text-blue-700 hover:bg-blue-50">
+                  <Link
+                    href="/auth/signin"
+                    onClick={() => setOpen(false)}
+                    className="rounded-xl border border-blue-600 px-3 py-2 text-center text-sm font-medium text-blue-700 hover:bg-blue-50"
+                  >
                     {t('auth.signIn', { defaultMessage: 'Masuk' })}
                   </Link>
-                  <Link href="/auth/signup_perusahaan" onClick={() => setOpen(false)} className="rounded-xl bg-amber-500 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-amber-600">
+                  <Link
+                    href="/auth/signup_perusahaan"
+                    onClick={() => setOpen(false)}
+                    className="rounded-xl bg-amber-500 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-amber-600"
+                  >
                     {t('auth.signUp', { defaultMessage: 'Daftar' })}
                   </Link>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {/* Profil & Dashboard selalu ada saat login */}
+                  <Link
+                    href={isEmployer ? '/profile_employer' : '/profile'}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                  >
+                    <UserIcon className="h-5 w-5" />
+                    <span>{t('user.profile', { defaultMessage: 'Profile' })}</span>
+                  </Link>
+                  <Link
+                    href={isEmployer ? '/employer' : '/dashboard'}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                  >
+                    <GridIcon className="h-5 w-5" />
+                    <span>
+                      {isEmployer
+                        ? t('emp.dashboard', { defaultMessage: 'Employer Dashboard' })
+                        : t('user.dashboard', { defaultMessage: 'Dashboard' })}
+                    </span>
+                  </Link>
+
+                  {/* Tambahan khusus employer */}
                   {isEmployer && (
                     <>
-                      <Link href="/employer/jobs/new" onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
-                        {t('emp.postJob', { defaultMessage: 'Post a Job' })}
+                      <Link
+                        href="/employer/jobs/new"
+                        onClick={() => setOpen(false)}
+                        className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                      >
+                        <BriefcaseIcon className="h-5 w-5" />
+                        <span>{t('emp.postJob', { defaultMessage: 'Post a Job' })}</span>
                       </Link>
-                      <Link href="/employer/applications" onClick={() => setOpen(false)} className="block rounded-xl px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900">
-                        {t('emp.applications', { defaultMessage: 'Applications' })}
+                      <Link
+                        href="/employer/applications"
+                        onClick={() => setOpen(false)}
+                        className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                      >
+                        <FileTextIcon className="h-5 w-5" />
+                        <span>{t('emp.applications', { defaultMessage: 'Applications' })}</span>
                       </Link>
                     </>
                   )}
-                  <button
-                    onClick={async () => {
-                      await handleSignout();
-                      setOpen(false);
-                    }}
-                    className="block w-full rounded-xl border border-red-600 px-3 py-2 text-center text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white"
-                  >
-                    {t('user.logout', { defaultMessage: 'Sign out' })}
-                  </button>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        switchLocale();
+                        setOpen(false);
+                      }}
+                      className="rounded-xl border border-neutral-300 px-3 py-2 text-center text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                    >
+                      🌐 {locale === 'en' ? 'EN' : 'ID'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await handleSignout();
+                        setOpen(false);
+                      }}
+                      className="rounded-xl border border-red-600 px-3 py-2 text-center text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white"
+                    >
+                      {t('user.logout', { defaultMessage: 'Sign out' })}
+                    </button>
+                  </div>
                 </div>
               )}
             </nav>

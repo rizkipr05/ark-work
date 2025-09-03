@@ -86,12 +86,22 @@ export default function ProfileEmployerPage() {
 
   const [jobs, setJobs] = useState<Job[]>([]);
 
+  // ===== modal alert (modern) =====
+  const [modal, setModal] = useState<{
+    type: 'ok' | 'err';
+    title?: string;
+    message: string;
+  } | null>(null);
+  const showOK = (message: string, title = 'Berhasil') =>
+    setModal({ type: 'ok', title, message });
+  const showERR = (message: string, title = 'Gagal') =>
+    setModal({ type: 'err', title, message });
+
   // ====== Load data: me -> profile
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        // ✅ balik pakai endpoint auth yang pasti authorized + kirim email admin
         const me = await api<MeResp>('/api/employers/auth/me');
         if (!alive) return;
 
@@ -118,7 +128,7 @@ export default function ProfileEmployerPage() {
           }));
         }
 
-        // dummy jobs
+        // dummy jobs (ganti dengan fetch aslinya jika endpoint siap)
         setJobs([
           { id: 1, title: 'Senior Frontend Engineer', location: 'Jakarta', type: 'Full-time', postedAt: new Date().toISOString() },
           { id: 2, title: 'Product Designer (UI/UX)', location: 'Remote (ID)', type: 'Full-time', postedAt: new Date(Date.now() - 86400000 * 5).toISOString() },
@@ -126,6 +136,7 @@ export default function ProfileEmployerPage() {
         ]);
       } catch (e) {
         console.error('[profile] load failed:', e);
+        showERR('Gagal memuat profil perusahaan.');
       } finally {
         if (alive) setLoading(false);
       }
@@ -163,10 +174,13 @@ export default function ProfileEmployerPage() {
             window.dispatchEvent(new Event('ark:avatar-updated'));
           }
         } catch {}
+        showOK('Logo berhasil diunggah.');
+      } else {
+        showERR('Gagal menyimpan logo.');
       }
     } catch (err) {
       console.error('upload logo error:', err);
-      alert('Gagal upload logo');
+      showERR('Gagal mengunggah logo. Coba lagi.');
     }
   }
 
@@ -207,10 +221,10 @@ export default function ProfileEmployerPage() {
         } as any,
       });
 
-      alert('Profil disimpan.');
+      showOK('Profil berhasil disimpan.');
     } catch (err) {
       console.error('save profile error:', err);
-      alert('Validation error');
+      showERR('Gagal menyimpan profil. Periksa kembali isian Anda.');
     } finally {
       setSaving(false);
     }
@@ -250,6 +264,7 @@ export default function ProfileEmployerPage() {
                 <div className="relative overflow-hidden rounded-2xl ring-1 ring-slate-200 dark:ring-slate-700">
                   <div className="h-24 w-24 bg-slate-50 dark:bg-slate-800 grid place-items-center">
                     {logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={toAbs(logoUrl)} alt="Logo" className="h-full w-full object-cover" />
                     ) : (
                       <span className="text-xs text-slate-500">No logo</span>
@@ -402,7 +417,11 @@ export default function ProfileEmployerPage() {
                 Kembali
               </Link>
               <div className="flex gap-3">
-                <button type="button" className="btn-secondary">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => showOK('Draft disimpan secara lokal (contoh).')}
+                >
                   Simpan Draft
                 </button>
                 <ButtonPrimary type="submit" loading={saving}>
@@ -449,6 +468,16 @@ export default function ProfileEmployerPage() {
           </aside>
         </form>
       </main>
+
+      {/* ====== Alert Modal (modern) ====== */}
+      {modal && (
+        <AlertModal
+          type={modal.type}
+          title={modal.title}
+          message={modal.message}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -498,6 +527,7 @@ function ButtonPrimary({
       className={[
         'inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm',
         'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         'disabled:opacity-70 disabled:cursor-not-allowed',
       ].join(' ')}
     >
@@ -509,5 +539,73 @@ function ButtonPrimary({
       )}
       {children}
     </button>
+  );
+}
+
+/* ===== Alert Modal (Modern) ===== */
+function AlertModal({
+  type,
+  title = type === 'ok' ? 'Berhasil' : 'Gagal',
+  message,
+  onClose,
+}: {
+  type: 'ok' | 'err';
+  title?: string;
+  message: string;
+  onClose: () => void;
+}) {
+  const Icon =
+    type === 'ok'
+      ? () => (
+          <div className="grid h-12 w-12 place-items-center rounded-full bg-emerald-100 text-emerald-600">
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+              <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+        )
+      : () => (
+          <div className="grid h-12 w-12 place-items-center rounded-full bg-rose-100 text-rose-600">
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+              <path d="M12 9v4M12 17h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </div>
+        );
+
+  // close on ESC
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative m-4 w-full max-w-sm translate-y-0 animate-[fadeIn_.2s_ease] rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="mx-auto mb-3">
+          <Icon />
+        </div>
+        <h3 className="text-center text-lg font-semibold text-slate-900 dark:text-slate-50">{title}</h3>
+        <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-300 whitespace-pre-line">
+          {message}
+        </p>
+        <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-800/80"
+          >
+            Tutup
+          </button>
+          {type === 'ok' && (
+            <button
+              onClick={onClose}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              Oke
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

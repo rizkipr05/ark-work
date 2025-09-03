@@ -20,6 +20,11 @@ type JobDTO = {
   company: string;
   logoUrl: string | null;
   isActive: boolean;
+  // opsional
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  currency?: string | null;
+  requirements?: string | null;
 };
 
 type Job = {
@@ -34,6 +39,10 @@ type Job = {
   description: string;
   company?: string;
   logo?: string | null; // data URL atau URL
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  currency?: string | null;
+  requirements?: string | null;
 };
 
 const LS_KEY = 'ark_jobs';
@@ -51,7 +60,7 @@ type LocalJob = {
   deadline?: string | null;
   tags?: string[];
   description?: string;
-  requirements?: string;
+  requirements?: string | null;
   postedAt?: string; // ISO
   status?: 'active' | 'closed';
   logo?: string | null; // data URL
@@ -106,6 +115,10 @@ function normalizeLocal(ls: LocalJob[]): Job[] {
       posted: isoToYmd(j.postedAt),
       description: j.description || '',
       logo: j.logo ?? null,
+      salaryMin: j.salaryMin ?? null,
+      salaryMax: j.salaryMax ?? null,
+      currency: j.currency ?? 'IDR',
+      requirements: j.requirements ?? null,
     }));
 }
 
@@ -136,14 +149,35 @@ function normalizeServer(arr: JobDTO[]): Job[] {
       title: j.title,
       company: j.company,
       location: j.location || 'Indonesia',
-      industry: 'Oil & Gas', // default; bisa diperkaya jika backend kirim tags
+      industry: 'Oil & Gas',
       contract: mapContractFromServer(j.employment),
       function: mapFunctionFromTextServer(j),
       remote: mapRemoteFromServer(j.location),
       posted: isoToYmd(j.postedAt),
       description: j.description || '',
       logo: j.logoUrl || null,
+      salaryMin: j.salaryMin ?? null,
+      salaryMax: j.salaryMax ?? null,
+      currency: j.currency ?? null,
+      requirements: j.requirements ?? null,
     }));
+}
+
+/* ------------ Formatters ------------ */
+function formatMoney(n?: number | null, curr: string = 'IDR') {
+  if (n == null) return '';
+  try {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: curr }).format(n);
+  } catch {
+    return `${curr} ${n.toLocaleString('id-ID')}`;
+  }
+}
+function formatSalary(min?: number | null, max?: number | null, curr?: string | null) {
+  if (min == null && max == null) return '';
+  const c = curr || 'IDR';
+  if (min != null && max != null) return `${formatMoney(min, c)} – ${formatMoney(max, c)}`;
+  if (min != null) return `≥ ${formatMoney(min, c)}`;
+  return `≤ ${formatMoney(max!, c)}`;
 }
 
 /* ---------------- Page ---------------- */
@@ -160,11 +194,14 @@ export default function JobsPage() {
     func: '',
     remote: '',
   });
-  const [selected, setSelected] = useState<Job | null>(null);
   const [saved, setSaved] = useState<Array<string | number>>([]);
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [drawer, setDrawer] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+
+  // Modal detail state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailJob, setDetailJob] = useState<Job | null>(null);
 
   // baca localStorage jobs
   const readLocal = (): LocalJob[] => {
@@ -294,6 +331,30 @@ export default function JobsPage() {
     return isNaN(d.getTime()) ? ymd : dateFmt.format(d);
   };
 
+  function openDetail(job: Job) {
+    setDetailJob(job);
+    setDetailOpen(true);
+  }
+
+  function applySelected(sel: Job | null) {
+    if (!sel) return;
+    const cur = localStorage.getItem('ark_current');
+    if (!cur) {
+      alert('Silakan login terlebih dahulu untuk melamar.');
+      return;
+    }
+    const apps = JSON.parse(localStorage.getItem('ark_apps') ?? '{}');
+    const arr = apps[cur] ?? [];
+    if (arr.find((a: any) => a.jobId === sel.id)) {
+      alert('Anda sudah melamar lowongan ini.');
+      return;
+    }
+    arr.push({ jobId: sel.id, date: new Date().toISOString().split('T')[0] });
+    apps[cur] = arr;
+    localStorage.setItem('ark_apps', JSON.stringify(apps));
+    setDetailOpen(false);
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
@@ -398,14 +459,15 @@ export default function JobsPage() {
         </aside>
 
         {/* List */}
-        <section className="lg:col-span-6 space-y-4">
+        <section className="lg:col-span-9 space-y-4">
           {items.length === 0 ? (
             <EmptyState t={t} />
           ) : (
             items.map((job) => (
               <article
                 key={job.id}
-                className="group rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
+                onClick={() => openDetail(job)}
+                className="group cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
               >
                 <div className="flex gap-4">
                   <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
@@ -424,20 +486,20 @@ export default function JobsPage() {
                         </h3>
                         <p className="text-sm text-neutral-600 truncate">{job.company || t('common.company')}</p>
                       </div>
-                      <button
-                        onClick={() => setSelected(job)}
-                        className="rounded-lg bg-neutral-900 text-white px-3 py-1.5 text-xs hover:opacity-90"
-                      >
+                      <span className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-700">
                         {t('common.view')}
-                      </button>
+                      </span>
                     </div>
 
                     {/* meta row */}
-                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[13px]">
+                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[13px]">
                       <Meta icon={<PinIcon className="h-4 w-4" />} text={job.location} />
                       <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={job.contract} />
                       <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.industry} />
                       <Meta icon={<GlobeIcon className="h-4 w-4" />} text={job.remote} />
+                      {job.salaryMin != null || job.salaryMax != null ? (
+                        <Meta icon={<MoneyIcon className="h-4 w-4" />} text={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
+                      ) : null}
                     </div>
 
                     <p className="mt-3 line-clamp-2 text-sm text-neutral-600">{job.description}</p>
@@ -447,7 +509,10 @@ export default function JobsPage() {
                         {t('common.posted', { date: formatPosted(job.posted) })}
                       </span>
                       <button
-                        onClick={() => toggleSave(job.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSave(job.id);
+                        }}
                         className={[
                           'rounded-lg border px-2.5 py-1 text-xs transition',
                           saved.includes(job.id)
@@ -464,18 +529,6 @@ export default function JobsPage() {
             ))
           )}
         </section>
-
-        {/* Detail (desktop sticky) */}
-        <aside className="hidden lg:col-span-3 lg:block">
-          <DetailPanel
-            tns={t}
-            job={selected}
-            onApply={() => applySelected(selected)}
-            onSave={() => selected && toggleSave(selected.id)}
-            saved={selected ? saved.includes(selected.id) : false}
-            formatPosted={formatPosted}
-          />
-        </aside>
       </div>
 
       {/* Drawer (mobile filters) */}
@@ -527,27 +580,18 @@ export default function JobsPage() {
           </div>
         </Drawer>
       )}
+
+      {/* Detail Modal (besar, logo perusahaan di header) */}
+      {detailOpen && detailJob && (
+        <DetailModal
+          job={detailJob}
+          onClose={() => setDetailOpen(false)}
+          onApply={() => applySelected(detailJob)}
+          postedText={formatPosted(detailJob.posted)}
+        />
+      )}
     </div>
   );
-
-  function applySelected(sel: Job | null) {
-    if (!sel) return;
-    const cur = localStorage.getItem('ark_current');
-    if (!cur) {
-      alert(t('apply.needLogin'));
-      return;
-    }
-    const apps = JSON.parse(localStorage.getItem('ark_apps') ?? '{}');
-    const arr = apps[cur] ?? [];
-    if (arr.find((a: any) => a.jobId === sel.id)) {
-      alert(t('apply.dup'));
-      return;
-    }
-    arr.push({ jobId: sel.id, date: new Date().toISOString().split('T')[0] });
-    apps[cur] = arr;
-    localStorage.setItem('ark_apps', JSON.stringify(apps));
-    alert(t('apply.ok'));
-  }
 }
 
 /* ---------------- UI helpers ---------------- */
@@ -629,82 +673,126 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
     </div>
   );
 }
-function DetailPanel({
+
+/* --------- Detail Modal (besar & lengkap) --------- */
+function DetailModal({
   job,
+  postedText,
+  onClose,
   onApply,
-  onSave,
-  saved,
-  tns,
-  formatPosted,
 }: {
-  job: Job | null;
+  job: Job;
+  postedText: string;
+  onClose: () => void;
   onApply: () => void;
-  onSave: () => void;
-  saved: boolean;
-  tns: ReturnType<typeof useTranslations>;
-  formatPosted: (iso: string) => string;
 }) {
-  if (!job) {
-    return (
-      <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-        {tns('detail.empty')}
+  return (
+    <div className="fixed inset-0 z-[100]">
+      <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]">
+          {/* Header (pakai logo perusahaan, bukan ceklis) */}
+          <div className="px-6 pt-6 pb-3 border-b border-slate-200">
+            <div className="flex justify-center mb-3">
+              <AvatarLogo name={job.company || job.title} src={job.logo} size={64} />
+            </div>
+            <h2 className="text-center text-lg font-semibold text-slate-900">Detail Lowongan</h2>
+            <p className="mt-1 text-center text-sm text-slate-600">{postedText}</p>
+          </div>
+
+          {/* Body (scrollable) */}
+          <div className="max-h-[65vh] overflow-auto px-6 py-5 space-y-5">
+            <div>
+              <div className="text-xl font-bold text-slate-900">{job.title}</div>
+              <div className="text-sm text-slate-600">{job.company}</div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <InfoRow label="Lokasi" value={job.location} />
+              <InfoRow label="Kontrak" value={job.contract} />
+              <InfoRow label="Mode Kerja" value={job.remote} />
+              {(job.salaryMin != null || job.salaryMax != null) && (
+                <InfoRow label="Gaji" value={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
+              )}
+            </div>
+
+            <Section title="Deskripsi Pekerjaan">
+              <RichText text={job.description || '-'} />
+            </Section>
+
+            {job.requirements ? (
+              <Section title="Persyaratan">
+                <RichText text={job.requirements} />
+              </Section>
+            ) : null}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-2 gap-3">
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Tutup
+            </button>
+            <button
+              onClick={onApply}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Lamar
+            </button>
+          </div>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold text-slate-900">{title}</h3>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function RichText({ text }: { text: string }) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const isList = lines.some((l) => l.startsWith('- ') || l.startsWith('• '));
+
+  if (isList) {
+    const items = lines.map((l) => l.replace(/^[-•]\s?/, '')).filter(Boolean);
+    return (
+      <ul className="list-disc pl-5 space-y-1">
+        {items.map((it, idx) => (
+          <li key={idx}>{it}</li>
+        ))}
+      </ul>
     );
   }
+
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm sticky top-24">
-      <div className="flex items-start gap-3">
-        <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
-          {job.logo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img alt={job.company || 'logo'} src={job.logo} className="h-full w-full object-cover" />
-          ) : (
-            initials(job.company || 'AW')
-          )}
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-neutral-900">{job.title}</h2>
-          <p className="text-sm text-neutral-600">
-            {job.company || tns('common.company')} • {job.location}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-        <Info label={tns('detail.industry')} value={job.industry} />
-        <Info label={tns('detail.contract')} value={job.contract} />
-        <Info label={tns('detail.function')} value={job.function} />
-        <Info label={tns('detail.workmode')} value={job.remote} />
-        <Info label={tns('detail.posted')} value={formatPosted(job.posted)} />
-        <Info label={tns('detail.id')} value={String(job.id)} />
-      </div>
-
-      <p className="mt-4 text-sm text-neutral-700">{job.description}</p>
-
-      <div className="mt-5 space-y-2">
-        <button onClick={onApply} className="w-full rounded-xl bg-neutral-900 px-4 py-2.5 text-white hover:opacity-90">
-          {tns('detail.apply')}
-        </button>
-        <button
-          onClick={onSave}
-          className={`w-full rounded-xl px-4 py-2.5 ${
-            saved ? 'bg-amber-500 text-white' : 'bg-neutral-200 text-neutral-800 hover:bg-neutral-300'
-          }`}
-        >
-          {saved ? tns('common.saved') : tns('detail.saveJob')}
-        </button>
-      </div>
+    <div className="space-y-2">
+      {text.split('\n').map((p, i) => (
+        <p key={i}>{p}</p>
+      ))}
     </div>
   );
 }
-function Info({ label, value }: { label: string; value: string }) {
+
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="text-sm text-neutral-900 break-words">{value}</div>
+    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-sm font-medium text-slate-900">{value}</span>
     </div>
   );
 }
+
+/* ------------ Drawer & Empty ------------ */
 function Drawer({
   children,
   onClose,
@@ -732,11 +820,11 @@ function Drawer({
 function EmptyState({ t }: { t: ReturnType<typeof useTranslations> }) {
   return (
     <div className="rounded-3xl border border-dashed border-neutral-300 bg-white p-10 text-center">
-        <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-neutral-100 grid place-items-center">
-          <SearchIcon className="h-6 w-6 text-neutral-600" />
-        </div>
-        <h3 className="font-semibold text-neutral-900">{t('empty.title')}</h3>
-        <p className="mt-1 text-sm text-neutral-600">{t('empty.desc')}</p>
+      <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-neutral-100 grid place-items-center">
+        <SearchIcon className="h-6 w-6 text-neutral-600" />
+      </div>
+      <h3 className="font-semibold text-neutral-900">{t('empty.title')}</h3>
+      <p className="mt-1 text-sm text-neutral-600">{t('empty.desc')}</p>
     </div>
   );
 }
@@ -776,6 +864,15 @@ function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+function MoneyIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M7 9h0M17 15h0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 function CogIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
@@ -812,4 +909,22 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+/* ------------ Small: Avatar Logo (dipakai header modal) ------------ */
+function AvatarLogo({ name, src, size = 64 }: { name?: string; src?: string | null; size?: number }) {
+  return (
+    <div
+      className="grid place-items-center rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 text-white font-bold"
+      style={{ width: size, height: size }}
+      aria-label="Company logo"
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt={name || 'logo'} className="h-full w-full object-cover" />
+      ) : (
+        <span className="select-none text-xl">{initials(name || 'AW')}</span>
+      )}
+    </div>
+  );
 }

@@ -4,20 +4,34 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 
 /* ===== Enum harus sama persis dengan backend (Prisma) ===== */
-type Sector = 'OIL_GAS' | 'RENEWABLE_ENERGY' | 'UTILITIES' | 'ENGINEERING';
+type Sector = 'OIL_GAS' | 'RENEWABLE_ENERGY' | 'UTILITIES';
 type Status = 'OPEN' | 'PREQUALIFICATION' | 'CLOSED';
 type Contract = 'EPC' | 'SUPPLY' | 'CONSULTING' | 'MAINTENANCE';
+
+/* ---------- Regions ---------- */
+const REGIONS = [
+  'Sumatra',
+  'Jawa',
+  'Kalimantan',
+  'Sulawesi',
+  'Papua',
+  'Maluku',
+  'Bali & Nusa Tenggara',
+  'Luar Negeri',
+  'OTHER', // tampil sebagai "Other (ketik manual)"
+] as const;
+type RegionOption = (typeof REGIONS)[number];
 
 type FormState = {
   title: string;
   buyer: string;
   sector: Sector;
-  location: string;
   status: Status;
   contract: Contract;
-  budgetUSD: number;
-  teamSlots: number;
-  deadline: string; // yyyy-mm-dd
+  region: RegionOption;      // UI dropdown
+  regionOther: string;       // diisi ketika region === 'OTHER'
+  budgetUSD: number;         // label tampil "Project Value (USD)"
+  deadline: string;          // yyyy-mm-dd
   description: string;
   documentsCsv: string;
 };
@@ -29,9 +43,7 @@ type Tender = {
   sector: Sector;
   status: Status;
   contract: Contract;
-  location: string;
   budgetUSD: number;
-  teamSlots: number;
   deadline: string; // ISO
   description: string;
   documents?: string[];
@@ -49,11 +61,11 @@ export default function AdminTendersPage() {
     title: '',
     buyer: '',
     sector: 'OIL_GAS',
-    location: '',
     status: 'OPEN',
     contract: 'EPC',
+    region: 'Jawa',
+    regionOther: '',
     budgetUSD: 0,
-    teamSlots: 0,
     deadline: new Date().toISOString().slice(0, 10),
     description: '',
     documentsCsv: '',
@@ -76,11 +88,13 @@ export default function AdminTendersPage() {
     setListErr(null);
     try {
       const res: any = await api(PATH_ADMIN_TENDERS, { method: 'GET' });
-      const rows: any[] = Array.isArray(res) ? res
-        : Array.isArray(res?.items) ? res.items
-        : Array.isArray(res?.data) ? res.data
+      const rows: any[] = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.items)
+        ? res.items
+        : Array.isArray(res?.data)
+        ? res.data
         : [];
-      // sort terbaru dulu (kalau ada createdAt/updatedAt)
       rows.sort((a, b) => +new Date(b?.createdAt || 0) - +new Date(a?.createdAt || 0));
       setList(rows as Tender[]);
     } catch (e: any) {
@@ -90,32 +104,50 @@ export default function AdminTendersPage() {
     }
   }
 
-  useEffect(() => { fetchList(); }, []);
+  useEffect(() => {
+    fetchList();
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+
+    // tentukan nilai "location" yang akan dikirim ke backend
+    const effectiveLocation =
+      f.region === 'OTHER' ? (f.regionOther || '').trim() : f.region;
+
+    if (!effectiveLocation) {
+      setErr('Mohon isi wilayah terlebih dahulu.');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         title: f.title.trim(),
         buyer: f.buyer.trim(),
         sector: f.sector,
-        location: f.location.trim(),
+        location: effectiveLocation, // <— dikirim sebagai "location"
         status: f.status,
         contract: f.contract,
         budgetUSD: Number(f.budgetUSD) || 0,
-        teamSlots: Number(f.teamSlots) || 0,
         description: f.description.trim(),
         documents: f.documentsCsv.split(',').map((s) => s.trim()).filter(Boolean),
         deadline: new Date(f.deadline + 'T00:00:00').toISOString(),
       };
 
-      await api(PATH_ADMIN_TENDERS, { json: payload }); // created id biasanya dikembalikan
+      await api(PATH_ADMIN_TENDERS, { json: payload });
       alert('Tender created!');
-      // reset sebagian
-      setF((s) => ({ ...s, title: '', buyer: '', location: '', description: '', documentsCsv: '' }));
-      // refresh list
+      setF((s) => ({
+        ...s,
+        title: '',
+        buyer: '',
+        description: '',
+        documentsCsv: '',
+        region: 'Jawa',
+        regionOther: '',
+        budgetUSD: 0,
+      }));
       fetchList();
     } catch (e: any) {
       setErr(e?.message || 'Failed to create tender');
@@ -134,6 +166,8 @@ export default function AdminTendersPage() {
       alert(e?.message || 'Failed to delete tender');
     }
   }
+
+  const needOther = f.region === 'OTHER';
 
   return (
     <div className="space-y-8">
@@ -162,7 +196,7 @@ export default function AdminTendersPage() {
           </div>
 
           <div className="grid gap-2">
-            <label className="text-sm font-medium">Buyer</label>
+            <label className="text-sm font-medium">Owner</label>
             <input
               value={f.buyer}
               onChange={(e) => onChange('buyer', e.target.value)}
@@ -182,19 +216,44 @@ export default function AdminTendersPage() {
                 <option value="OIL_GAS">OIL_GAS</option>
                 <option value="RENEWABLE_ENERGY">RENEWABLE_ENERGY</option>
                 <option value="UTILITIES">UTILITIES</option>
-                <option value="ENGINEERING">ENGINEERING</option>
               </select>
             </div>
 
+            {/* Region (Wilayah) */}
             <div className="grid gap-2">
-              <label className="text-sm font-medium">Location</label>
-              <input
-                value={f.location}
-                onChange={(e) => onChange('location', e.target.value)}
+              <label className="text-sm font-medium">Region / Wilayah</label>
+              <select
+                value={f.region}
+                onChange={(e) => onChange('region', e.target.value as RegionOption)}
                 className="rounded-xl border px-3 py-2"
-              />
+              >
+                {REGIONS.map((r) =>
+                  r === 'OTHER' ? (
+                    <option key={r} value={r}>Other (ketik manual)</option>
+                  ) : (
+                    <option key={r} value={r}>{r}</option>
+                  )
+                )}
+              </select>
             </div>
           </div>
+
+          {/* Input manual untuk Other */}
+          {needOther && (
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Wilayah (manual)</label>
+              <input
+                value={f.regionOther}
+                onChange={(e) => onChange('regionOther', e.target.value)}
+                placeholder="Contoh: Timur Tengah, Eropa, Amerika, dsb."
+                className="rounded-xl border px-3 py-2"
+                required
+              />
+              <p className="text-xs text-neutral-500">
+                Isi jika memilih &ldquo;Other&rdquo; di atas.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="grid gap-2">
@@ -225,9 +284,9 @@ export default function AdminTendersPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <label className="text-sm font-medium">Budget (USD)</label>
+              <label className="text-sm font-medium">Project Value (USD)</label>
               <input
                 type="number"
                 value={f.budgetUSD}
@@ -236,16 +295,7 @@ export default function AdminTendersPage() {
                 min={0}
               />
             </div>
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Team Slots</label>
-              <input
-                type="number"
-                value={f.teamSlots}
-                onChange={(e) => onChange('teamSlots', Number(e.target.value))}
-                className="rounded-xl border px-3 py-2"
-                min={0}
-              />
-            </div>
+
             <div className="grid gap-2">
               <label className="text-sm font-medium">Deadline</label>
               <input
@@ -324,7 +374,7 @@ export default function AdminTendersPage() {
                   <Th>Sector</Th>
                   <Th>Status</Th>
                   <Th>Contract</Th>
-                  <Th>Budget</Th>
+                  <Th>Project Value</Th>
                   <Th>Deadline</Th>
                   <Th className="text-right">Actions</Th>
                 </tr>
@@ -371,5 +421,7 @@ function fmtDate(iso?: string) {
   try {
     const d = new Date(iso);
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-  } catch { return iso; }
+  } catch {
+    return iso;
+  }
 }

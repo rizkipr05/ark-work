@@ -674,7 +674,7 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-/* --------- Detail Modal (besar & lengkap) --------- */
+/* --------- Detail Modal (besar & lengkap) + LAPORKAN --------- */
 function DetailModal({
   job,
   postedText,
@@ -686,15 +686,17 @@ function DetailModal({
   onClose: () => void;
   onApply: () => void;
 }) {
+  const [reportOpen, setReportOpen] = useState(false);
+
   return (
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]">
-          {/* Header (pakai logo perusahaan, bukan ceklis) */}
+          {/* Header (pakai logo perusahaan) */}
           <div className="px-6 pt-6 pb-3 border-b border-slate-200">
             <div className="flex justify-center mb-3">
-              <AvatarLogo name={job.company || job.title} src={job.logo} size={64} />
+              <AvatarLogo name={job.company || job.title} src={job.logo || undefined} size={64} />
             </div>
             <h2 className="text-center text-lg font-semibold text-slate-900">Detail Lowongan</h2>
             <p className="mt-1 text-center text-sm text-slate-600">{postedText}</p>
@@ -728,7 +730,13 @@ function DetailModal({
           </div>
 
           {/* Footer */}
-          <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-2 gap-3">
+          <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              onClick={() => setReportOpen(true)}
+              className="rounded-xl border border-red-500 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+            >
+              Laporkan
+            </button>
             <button
               onClick={onClose}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -741,6 +749,151 @@ function DetailModal({
             >
               Lamar
             </button>
+          </div>
+        </div>
+      </div>
+
+      {reportOpen && (
+        <ReportDialog job={job} onClose={() => setReportOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Dialog Laporkan ---------- */
+function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
+  const [reason, setReason] = useState<string>('Spam / Penipuan');
+  const [note, setNote] = useState<string>('');
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submitReport() {
+    setSending(true);
+    setErr(null);
+    try {
+      const res = await fetch('/api/jobs/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job.id,
+          title: job.title,
+          company: job.company,
+          reason,
+          note,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDone(true);
+    } catch (e: any) {
+      // fallback simpan lokal
+      try {
+        const key = 'ark_job_reports';
+        const list = JSON.parse(localStorage.getItem(key) ?? '[]');
+        list.push({
+          at: new Date().toISOString(),
+          jobId: job.id,
+          title: job.title,
+          company: job.company,
+          reason,
+          note,
+        });
+        localStorage.setItem(key, JSON.stringify(list));
+        setDone(true);
+      } catch {
+        setErr('Gagal mengirim laporan.');
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[120]">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 h-12">
+            <div className="text-sm font-semibold">Laporkan Lowongan</div>
+            <button
+              onClick={onClose}
+              className="grid h-9 w-9 place-items-center rounded-lg border border-neutral-200 hover:bg-neutral-50"
+            >
+              <CloseIcon className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div className="font-medium text-slate-900">{job.title}</div>
+              <div className="text-slate-600">{job.company}</div>
+            </div>
+
+            {done ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                Terima kasih. Laporanmu telah kami terima.
+              </div>
+            ) : (
+              <>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">
+                    Alasan
+                  </span>
+                  <select
+                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  >
+                    {[
+                      'Spam / Penipuan',
+                      'Informasi Menyesatkan',
+                      'Konten Tidak Pantas',
+                      'Duplikat / Sudah Tidak Aktif',
+                      'Lainnya',
+                    ].map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">
+                    Catatan (opsional)
+                  </span>
+                  <textarea
+                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400 min-h-[90px]"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Tambahkan detail yang membantu tim kami meninjau laporanmu."
+                  />
+                </label>
+
+                {err && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+                    {err}
+                  </div>
+                )}
+
+                <div className="pt-1 flex items-center justify-end gap-2">
+                  <button
+                    onClick={onClose}
+                    disabled={sending}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={submitReport}
+                    disabled={sending}
+                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {sending ? 'Mengirim…' : 'Kirim Laporan'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -219,7 +219,7 @@ export default function AuthPage() {
                       tabIndex={-1}
                       aria-label={tIn('form.togglePw')}
                     >
-                      {siShow ? '🙈' : '👁️'}
+                      {siShow ? '👁️' : '🙈'}
                     </button>
                   </div>
                 </label>
@@ -319,7 +319,7 @@ export default function AuthPage() {
                       tabIndex={-1}
                       aria-label={tUp('form.togglePw')}
                     >
-                      {suShow ? '🙈' : '👁️'}
+                      {suShow ? '👁️' : '🙈'}
                     </button>
                   </div>
                   <div
@@ -368,7 +368,7 @@ export default function AuthPage() {
                       tabIndex={-1}
                       aria-label={tUp('form.toggleConfirm')}
                     >
-                      {suShowC ? '🙈' : '👁️'}
+                      {suShowC ? '👁️' : '🙈'}
                     </button>
                   </div>
                   {suConfirm.length > 0 && (

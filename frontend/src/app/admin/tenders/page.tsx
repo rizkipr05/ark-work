@@ -286,7 +286,7 @@ export default function AdminTendersPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <label className="text-sm font-medium">Project Value (USD)</label>
+              <label className="text-sm font-medium">Project Value (Rp)</label>
               <input
                 type="number"
                 value={f.budgetUSD}

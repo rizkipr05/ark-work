@@ -1,31 +1,75 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
-import { api } from '@/lib/api';
+import { useLocale } from 'next-intl';
 
-/* ================= Types (UI) ================= */
+/* ---------------- Server base (dukung 2 var + fallback dev) ---------------- */
+const API =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:4000';
+
+/* ---------------- Kurs & formatter ---------------- */
+type DisplayCurrency = 'IDR' | 'USD';
+const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const fmtIDR = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
+
+async function getRateUSDToIDR(): Promise<number> {
+  const r = await fetch('/api/rates?base=USD&symbols=IDR', { cache: 'no-store' });
+  if (!r.ok) throw new Error('Rate API error');
+  const j = await r.json();
+  const rate = Number(j?.rate);
+  if (!Number.isFinite(rate)) throw new Error('Invalid rate');
+  return rate; // 1 USD -> ? IDR
+}
+
+/* ---------------- Types (DTO dari backend) ---------------- */
+type TenderDTO = {
+  id: number | string;
+  title: string;
+  buyer: string;
+  sector: 'OIL_GAS' | 'RENEWABLE_ENERGY' | 'UTILITIES' | 'ENGINEERING';
+  location: string;
+  status: 'OPEN' | 'PREQUALIFICATION' | 'CLOSED';
+  contract: 'EPC' | 'SUPPLY' | 'CONSULTING' | 'MAINTENANCE';
+  budgetUSD: number;               // nilai disimpan di USD di DB
+  deadline: string;                // ISO
+  description: string;
+  documents?: string[] | null;
+  createdAt?: string | null;
+};
+
+/* ---------------- Types (UI) ---------------- */
 type SectorUI = 'Oil & Gas' | 'Renewable Energy' | 'Utilities' | 'Engineering';
 type StatusUI = 'Open' | 'Prequalification' | 'Closed';
 type ContractUI = 'EPC' | 'Supply' | 'Consulting' | 'Maintenance';
 
-type TenderUI = {
-  id: number;
+type Tender = {
+  id: number | string;
   title: string;
-  buyer: string;
-  sector: SectorUI;
+  company: string;           // buyer
   location: string;
+  sector: SectorUI;
   status: StatusUI;
   contract: ContractUI;
-  budgetUSD: number;
-  deadline: string; // YYYY-MM-DD
-  teamSlots: number;
+  budgetUSD: number;         // selalu sumber kebenaran
+  deadline: string;          // YYYY-MM-DD
   description: string;
-  documents?: string[];
+  documents: string[];
+  created: string;           // YYYY-MM-DD
 };
 
-/* ====== adapter: backend → UI (mapping enum prisma) ====== */
-function adaptSector(s: string): SectorUI {
+/* ---------------- Normalizers ---------------- */
+function toYmd(iso?: string): string {
+  try {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  } catch {
+    return iso || '';
+  }
+}
+function adaptSector(s: TenderDTO['sector']): SectorUI {
   switch (s) {
     case 'OIL_GAS': return 'Oil & Gas';
     case 'RENEWABLE_ENERGY': return 'Renewable Energy';
@@ -34,7 +78,7 @@ function adaptSector(s: string): SectorUI {
     default: return 'Engineering';
   }
 }
-function adaptStatus(s: string): StatusUI {
+function adaptStatus(s: TenderDTO['status']): StatusUI {
   switch (s) {
     case 'OPEN': return 'Open';
     case 'PREQUALIFICATION': return 'Prequalification';
@@ -42,7 +86,7 @@ function adaptStatus(s: string): StatusUI {
     default: return 'Open';
   }
 }
-function adaptContract(s: string): ContractUI {
+function adaptContract(s: TenderDTO['contract']): ContractUI {
   switch (s) {
     case 'EPC': return 'EPC';
     case 'SUPPLY': return 'Supply';
@@ -51,122 +95,162 @@ function adaptContract(s: string): ContractUI {
     default: return 'EPC';
   }
 }
-function toYmd(d: string | Date) {
-  try {
-    const dt = typeof d === 'string' ? new Date(d) : d;
-    return new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()))
-      .toISOString()
-      .slice(0, 10);
-  } catch { return ''; }
-}
-function adaptTender(row: any): TenderUI {
-  return {
-    id: Number(row.id),
-    title: String(row.title || ''),
-    buyer: String(row.buyer || ''),
-    sector: adaptSector(String(row.sector || 'ENGINEERING')),
-    location: String(row.location || ''),
-    status: adaptStatus(String(row.status || 'OPEN')),
-    contract: adaptContract(String(row.contract || 'EPC')),
-    budgetUSD: Number(row.budgetUSD || 0),
-    deadline: toYmd(row.deadline || new Date()),
-    teamSlots: Number(row.teamSlots || 0),
-    description: String(row.description || ''),
-    documents: Array.isArray(row.documents) ? row.documents : [],
-  };
+function normalizeServer(list: TenderDTO[]): Tender[] {
+  return (list || []).map((r) => ({
+    id: r.id,
+    title: r.title,
+    company: r.buyer,
+    location: r.location || 'Indonesia',
+    sector: adaptSector(r.sector),
+    status: adaptStatus(r.status),
+    contract: adaptContract(r.contract),
+    budgetUSD: Number(r.budgetUSD || 0),
+    deadline: toYmd(r.deadline),
+    description: r.description || '',
+    documents: Array.isArray(r.documents) ? r.documents : [],
+    created: toYmd(r.createdAt || r.deadline),
+  }));
 }
 
-/* ================= Page ================= */
-export default function TendersPage() {
-  const t = useTranslations('tenders');
+/* ---------------- Page ---------------- */
+export default function TendersLikeJobsPage() {
   const locale = useLocale();
 
-  const [tenders, setTenders] = useState<TenderUI[]>([]);
-  const [filters, setFilters] = useState({ q: '', loc: '', sector: '', status: '', contract: '' });
-  const [selected, setSelected] = useState<TenderUI | null>(null);
-  const [saved, setSaved] = useState<number[]>([]);
-  const [sort, setSort] = useState<'nearest' | 'farthest'>('nearest');
+  const [tenders, setTenders] = useState<Tender[]>([]);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
+
+  // filters
+  const [filters, setFilters] = useState({
+    q: '',
+    loc: '',
+    sector: '',
+    status: '',
+    contract: '',
+  });
+
+  // saved
+  const [saved, setSaved] = useState<Array<string | number>>([]);
+
+  // drawer + detail
   const [drawer, setDrawer] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTender, setDetailTender] = useState<Tender | null>(null);
 
-  const moneyFmt = useMemo(
-    () => new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }),
-    [locale]
-  );
-  const dateFmt = useMemo(
-    () => new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', year: 'numeric' }),
-    [locale]
-  );
+  // currency
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('IDR'); // default IDR
+  const [rateUSDtoIDR, setRateUSDtoIDR] = useState<number | null>(null);
+  const [rateErr, setRateErr] = useState<string | null>(null);
 
-  // === fetch dari backend ===
   useEffect(() => {
-    let cancelled = false;
+    let stop = false;
     (async () => {
-      setLoading(true);
-      setErr(null);
       try {
-        // ⬅️ gunakan endpoint publik backend yang benar
-        const res: any = await api('/api/tenders', { method: 'GET' });
-
-        // normalisasi bentuk respons (array langsung, atau {items: []} / {data: []})
-        const raw: any[] = Array.isArray(res)
-          ? res
-          : Array.isArray(res?.items)
-          ? res.items
-          : Array.isArray(res?.data)
-          ? res.data
-          : [];
-
-        const adapted = raw.map(adaptTender);
-        if (!cancelled) {
-          setTenders(adapted);
-          setSaved([]);
-          setSelected(adapted[0] ?? null);
-        }
+        setRateErr(null);
+        const r = await getRateUSDToIDR();
+        if (!stop) setRateUSDtoIDR(r);
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message || 'Failed to load tenders');
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!stop) setRateErr(e?.message || 'Failed to load rate');
       }
     })();
-    return () => { cancelled = true; };
+    return () => { stop = true; };
   }, []);
+
+  // load dari server
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoadErr(null);
+        const base = API.replace(/\/+$/, '');
+        const r = await fetch(`${base}/api/tenders`, { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json().catch(() => null);
+        const arr: TenderDTO[] = Array.isArray(j) ? j
+          : Array.isArray(j?.data) ? j.data
+          : Array.isArray(j?.items) ? j.items
+          : [];
+        const mapped = normalizeServer(arr);
+        const sorted = mapped.sort((a, b) =>
+          sort === 'newest'
+            ? new Date(b.created).getTime() - new Date(a.created).getTime()
+            : new Date(a.created).getTime() - new Date(b.created).getTime()
+        );
+        setTenders(sorted);
+      } catch (e: any) {
+        console.error('[Tenders] load error:', e);
+        setLoadErr(e?.message || 'Gagal memuat data');
+        setTenders([]);
+      }
+
+      // load saved
+      try {
+        setSaved(JSON.parse(localStorage.getItem('ark_saved_tenders') ?? '[]'));
+      } catch {}
+    })();
+  }, [sort]);
+
+  const dateFmt = useMemo(
+    () => new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit' }),
+    [locale]
+  );
 
   const items = useMemo(() => {
     const k = filters.q.toLowerCase();
     const loc = filters.loc.toLowerCase();
-    const arr = tenders.filter((t) =>
-      (k === '' || t.title.toLowerCase().includes(k) || t.buyer.toLowerCase().includes(k)) &&
-      (loc === '' || t.location.toLowerCase().includes(loc)) &&
-      (filters.sector === '' || t.sector === (filters.sector as SectorUI)) &&
-      (filters.status === '' || t.status === (filters.status as StatusUI)) &&
-      (filters.contract === '' || t.contract === (filters.contract as ContractUI))
-    );
+
+    const arr = tenders.filter((t) => {
+      const okQ = k === '' || t.title.toLowerCase().includes(k) || (t.company || '').toLowerCase().includes(k);
+      const okLoc = loc === '' || t.location.toLowerCase().includes(loc);
+      const okSector = filters.sector === '' || t.sector === (filters.sector as SectorUI);
+      const okStatus = filters.status === '' || t.status === (filters.status as StatusUI);
+      const okContract = filters.contract === '' || t.contract === (filters.contract as ContractUI);
+      return okQ && okLoc && okSector && okStatus && okContract;
+    });
+
     arr.sort((a, b) =>
-      sort === 'nearest'
-        ? new Date(a.deadline).getTime() - new Date(b.deadline).getTime()
-        : new Date(b.deadline).getTime() - new Date(a.deadline).getTime()
+      sort === 'newest'
+        ? new Date(b.created).getTime() - new Date(a.created).getTime()
+        : new Date(a.created).getTime() - new Date(b.created).getTime()
     );
+
     return arr;
   }, [tenders, filters, sort]);
 
-  const toggleSave = (id: number) => {
-    setSaved((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const fmtDate = (ymd: string) => {
+    try {
+      const d = new Date(ymd);
+      return isNaN(d.getTime()) ? ymd : dateFmt.format(d);
+    } catch {
+      return ymd;
+    }
   };
-  const clearFilters = () => setFilters({ q: '', loc: '', sector: '', status: '', contract: '' });
 
-  const fmtDate = (s: string) => {
-    try { return dateFmt.format(new Date(s + 'T00:00:00')); } catch { return s; }
+  const fmtMoney = (usd: number) => {
+    if (displayCurrency === 'USD') return fmtUSD.format(usd);
+    const rate = rateUSDtoIDR ?? 15000; // fallback 15k sementara
+    return fmtIDR.format(Math.round(usd * rate));
   };
-  const fmtMoney = (n: number) => moneyFmt.format(n);
 
-  // label i18n (pakai kunci yang sama dengan file sebelumnya)
-  const labelSector = (s: SectorUI) => t(`enums.sector.${s}`);
-  const labelStatus = (s: StatusUI) => t(`enums.status.${s}`);
-  const labelContract = (s: ContractUI) => t(`enums.contract.${s}`);
+  const toggleSave = (id: number | string) => {
+    const next = saved.includes(id) ? saved.filter((x) => x !== id) : [...saved, id];
+    setSaved(next);
+    localStorage.setItem('ark_saved_tenders', JSON.stringify(next));
+  };
 
-  /* ================== UI (bentuk tetap) ================== */
+  const clearFilters = () =>
+    setFilters({ q: '', loc: '', sector: '', status: '', contract: '' });
+
+  function openDetail(t: Tender) {
+    setDetailTender(t);
+    setDetailOpen(true);
+  }
+
+  function participateSelected(sel: Tender | null) {
+    if (!sel) return;
+    alert(`Anda berminat mengikuti: ${sel.title}`);
+    setDetailOpen(false);
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       {/* Header */}
@@ -174,11 +258,16 @@ export default function TendersPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-neutral-900">{t('title')}</h1>
-              <p className="text-neutral-600">{t('subtitle')}</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-neutral-900">Public Tenders</h1>
+              <p className="text-neutral-600">Cari tender terbaru dan ikuti sesuai bidangmu.</p>
+              {loadErr && (
+                <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {loadErr}
+                </div>
+              )}
             </div>
 
-            {/* Search + Sort */}
+            {/* Search + Sort + Mobile filter */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="relative">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">
@@ -187,247 +276,279 @@ export default function TendersPage() {
                 <input
                   value={filters.q}
                   onChange={(e) => setFilters((s) => ({ ...s, q: e.target.value }))}
-                  placeholder={t('ph.search')}
+                  placeholder="Cari judul atau pemilik tender…"
                   className="w-full sm:w-80 rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
                 />
               </div>
+
               <div className="flex items-center gap-2">
-                <label className="text-sm text-neutral-600">{t('sort.label')}</label>
+                <label className="text-sm text-neutral-600">Urutkan</label>
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as any)}
                   className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
                 >
-                  <option value="nearest">{t('sort.nearest')}</option>
-                  <option value="farthest">{t('sort.farthest')}</option>
+                  <option value="newest">Terbaru</option>
+                  <option value="oldest">Terlama</option>
                 </select>
               </div>
 
-              {/* Filter button (mobile) */}
               <button
                 onClick={() => setDrawer(true)}
                 className="sm:hidden inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
               >
-                <FilterIcon className="h-4 w-4" /> {t('filters.title')}
+                <FilterIcon className="h-4 w-4" /> Filter
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-12 lg:py-8 sm:px-6 lg:px-8">
-        {/* Sidebar */}
+      {/* Body */}
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-8 grid lg:grid-cols-12 gap-6">
+        {/* Sidebar filters (desktop) */}
         <aside className="hidden lg:col-span-3 lg:block">
           <FilterCard>
+            {/* Currency switch */}
+            <div className="mb-1 flex items-center justify-between rounded-xl border border-neutral-200 p-2">
+              <div className="text-sm">
+                <div className="font-medium text-neutral-800">Currency</div>
+                <div className="text-xs text-neutral-500">
+                  {rateErr
+                    ? 'Rate unavailable'
+                    : displayCurrency === 'IDR'
+                      ? `Showing in IDR • 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
+                      : 'Showing in USD'}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDisplayCurrency('IDR')}
+                  className={`px-2 py-1 rounded-lg text-xs ${displayCurrency==='IDR' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
+                >
+                  IDR
+                </button>
+                <button
+                  onClick={() => setDisplayCurrency('USD')}
+                  className={`px-2 py-1 rounded-lg text-xs ${displayCurrency==='USD' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
+                >
+                  USD
+                </button>
+              </div>
+            </div>
+
             <FilterInput
-              label={t('filters.location')}
+              label="Lokasi"
               value={filters.loc}
               onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
               icon={<PinIcon className="h-4 w-4" />}
-              placeholder={t('filters.ph.location')}
             />
             <FilterSelect
-              label={t('filters.sector')}
+              label="Sektor"
               value={filters.sector}
               onChange={(v) => setFilters((s) => ({ ...s, sector: v }))}
               options={['', 'Oil & Gas', 'Renewable Energy', 'Utilities', 'Engineering']}
-              display={(v) => (v ? labelSector(v as SectorUI) : t('filters.all', { what: t('filters.sector') }))}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.status')}
+              label="Status"
               value={filters.status}
               onChange={(v) => setFilters((s) => ({ ...s, status: v }))}
               options={['', 'Open', 'Prequalification', 'Closed']}
-              display={(v) => (v ? labelStatus(v as StatusUI) : t('filters.all', { what: t('filters.status') }))}
               icon={<FlagIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.contract')}
+              label="Kontrak"
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
               options={['', 'EPC', 'Supply', 'Consulting', 'Maintenance']}
-              display={(v) => (v ? labelContract(v as ContractUI) : t('filters.all', { what: t('filters.contract') }))}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
 
-            <div className="flex items-center justify-between pt-3">
+            <div className="pt-3 flex items-center justify-between">
               <span className="text-sm text-neutral-500">
-                {loading ? t('loading') : t('results', { count: items.length })}
+                {items.length} hasil
               </span>
               <button onClick={clearFilters} className="text-sm text-blue-700 hover:underline">
-                {t('filters.clear')}
+                Reset
               </button>
             </div>
           </FilterCard>
         </aside>
 
         {/* List */}
-        <section className="lg:col-span-6 space-y-4">
-          {err ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700 text-sm">{err}</div>
-          ) : loading ? (
-            <div className="rounded-3xl border border-dashed border-neutral-300 bg-white p-10 text-center">
-              {t('loading')}
-            </div>
-          ) : items.length === 0 ? (
-            <EmptyState t={t} />
+        <section className="lg:col-span-9 space-y-4">
+          {items.length === 0 ? (
+            <EmptyState />
           ) : (
-            items.map((tender) => {
-              const meta = buildDeadlineMeta(tender.deadline, tender.status, t, locale);
-              return (
-                <article
-                  key={tender.id}
-                  className="group cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
-                  onClick={() => setSelected(tender)}
-                >
-                  <div className="flex gap-4">
-                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 text-sm font-bold text-white">
-                      {initials(tender.buyer)}
+            items.map((t) => (
+              <article
+                key={t.id}
+                onClick={() => openDetail(t)}
+                className="group cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
+              >
+                <div className="flex gap-4">
+                  <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
+                    {initials(t.company || 'AW')}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base md:text-lg font-semibold text-neutral-900">
+                          {t.title}
+                        </h3>
+                        <p className="text-sm text-neutral-600 truncate">{t.company}</p>
+                      </div>
+                      <span className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-700">
+                        Detail
+                      </span>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-semibold text-neutral-900 md:text-lg">
-                            {tender.title}
-                          </h3>
-                          <p className="truncate text-sm text-neutral-600">{tender.buyer}</p>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleSave(tender.id);
-                          }}
-                          className={
-                            saved.includes(tender.id)
-                              ? 'rounded-lg border border-amber-500 bg-amber-50 px-2.5 py-1 text-xs text-amber-700 transition'
-                              : 'rounded-lg border border-neutral-300 px-2.5 py-1 text-xs text-neutral-700 transition hover:bg-neutral-50'
-                          }
-                        >
-                          {saved.includes(tender.id) ? t('btn.saved') : t('btn.save')}
-                        </button>
-                      </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                        <Meta icon={<PinIcon className="h-4 w-4" />} text={tender.location} />
-                        <Meta icon={<LayersIcon className="h-4 w-4" />} text={labelSector(tender.sector)} />
-                        <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={labelContract(tender.contract)} />
-                        <Meta icon={<FlagIcon className="h-4 w-4" />} text={labelStatus(tender.status)} />
-                      </div>
+                    {/* meta row */}
+                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 text-[13px]">
+                      <Meta icon={<PinIcon className="h-4 w-4" />} text={t.location} />
+                      <Meta icon={<LayersIcon className="h-4 w-4" />} text={t.sector} />
+                      <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={t.contract} />
+                      <Meta icon={<FlagIcon className="h-4 w-4" />} text={t.status} />
+                      <Meta icon={<CalendarIcon className="h-4 w-4" />} text={`Deadline ${fmtDate(t.deadline)}`} />
+                      <Meta icon={<MoneyIcon className="h-4 w-4" />} text={fmtMoney(t.budgetUSD)} />
+                    </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                        <InfoPill label={t('labels.budget')} value={fmtMoney(tender.budgetUSD)} />
-                        <InfoPill label={t('labels.teamSlots')} value={t('labels.teamN', { n: tender.teamSlots })} />
-                      </div>
+                    <p className="mt-3 line-clamp-2 text-sm text-neutral-600">{t.description}</p>
 
-                      <div className="mt-3">
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
-                          <div className={`h-full rounded-full ${meta.color}`} style={{ width: `${meta.progress}%` }} />
-                        </div>
-                        <div className="mt-1 text-xs text-neutral-500">
-                          {meta.progressText} • {fmtDate(tender.deadline)}
-                        </div>
-                      </div>
-
-                      <p className="mt-3 line-clamp-2 text-sm text-neutral-600">{tender.description}</p>
-
-                      <div className="mt-3 flex items-center justify-between">
-                        <DocsList docs={tender.documents} t={t} />
-                        <button
-                          className="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs text-white hover:opacity-90"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelected(tender);
-                          }}
-                        >
-                          {t('btn.view')}
-                        </button>
-                      </div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-xs text-neutral-500">
+                        Diposting: {fmtDate(t.created)}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSave(t.id);
+                        }}
+                        className={[
+                          'rounded-lg border px-2.5 py-1 text-xs transition',
+                          saved.includes(t.id)
+                            ? 'border-amber-500 bg-amber-50 text-amber-700'
+                            : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50',
+                        ].join(' ')}
+                      >
+                        {saved.includes(t.id) ? 'Tersimpan' : 'Simpan'}
+                      </button>
                     </div>
                   </div>
-                </article>
-              );
-            })
+                </div>
+              </article>
+            ))
           )}
         </section>
-
-        {/* Detail (desktop) */}
-        <aside className="hidden lg:col-span-3 lg:block">
-          <DetailPanel
-            tender={selected}
-            onParticipate={() => selected && alert(t('participate.alert', { title: selected.title }))}
-            onSave={() => selected && toggleSave(selected.id)}
-            saved={selected ? saved.includes(selected.id) : false}
-            t={t}
-            locale={locale}
-            labelSector={labelSector}
-            labelStatus={labelStatus}
-            labelContract={labelContract}
-            fmtMoney={(n) => moneyFmt.format(n)}
-            fmtDate={fmtDate}
-          />
-        </aside>
       </div>
 
       {/* Drawer (mobile filters) */}
       {drawer && (
-        <Drawer onClose={() => setDrawer(false)} title={t('filters.title')}>
+        <Drawer onClose={() => setDrawer(false)} title="Filter">
           <div className="space-y-3">
+            {/* Currency switch (mobile) */}
+            <div className="mb-1 flex items-center justify-between rounded-xl border border-neutral-200 p-2">
+              <div className="text-sm">
+                <div className="font-medium text-neutral-800">Currency</div>
+                <div className="text-xs text-neutral-500">
+                  {rateErr
+                    ? 'Rate unavailable'
+                    : displayCurrency === 'IDR'
+                      ? `Showing in IDR • 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
+                      : 'Showing in USD'}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDisplayCurrency('IDR')}
+                  className={`px-2 py-1 rounded-lg text-xs ${displayCurrency==='IDR' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
+                >
+                  IDR
+                </button>
+                <button
+                  onClick={() => setDisplayCurrency('USD')}
+                  className={`px-2 py-1 rounded-lg text-xs ${displayCurrency==='USD' ? 'bg-neutral-900 text-white' : 'bg-neutral-100'}`}
+                >
+                  USD
+                </button>
+              </div>
+            </div>
+
             <FilterInput
-              label={t('filters.location')}
+              label="Lokasi"
               value={filters.loc}
               onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
               icon={<PinIcon className="h-4 w-4" />}
-              placeholder={t('filters.ph.location')}
             />
             <FilterSelect
-              label={t('filters.sector')}
+              label="Sektor"
               value={filters.sector}
               onChange={(v) => setFilters((s) => ({ ...s, sector: v }))}
               options={['', 'Oil & Gas', 'Renewable Energy', 'Utilities', 'Engineering']}
-              display={(v) => (v ? labelSector(v as SectorUI) : t('filters.all', { what: t('filters.sector') }))}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.status')}
+              label="Status"
               value={filters.status}
               onChange={(v) => setFilters((s) => ({ ...s, status: v }))}
               options={['', 'Open', 'Prequalification', 'Closed']}
-              display={(v) => (v ? labelStatus(v as StatusUI) : t('filters.all', { what: t('filters.status') }))}
               icon={<FlagIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.contract')}
+              label="Kontrak"
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
               options={['', 'EPC', 'Supply', 'Consulting', 'Maintenance']}
-              display={(v) => (v ? labelContract(v as ContractUI) : t('filters.all', { what: t('filters.contract') }))}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-sm text-neutral-500">{loading ? t('loading') : t('results', { count: items.length })}</span>
+
+            <div className="pt-2 flex items-center justify-between">
+              <span className="text-sm text-neutral-500">
+                {items.length} hasil
+              </span>
               <button onClick={clearFilters} className="text-sm text-blue-700 hover:underline">
-                {t('filters.clear')}
+                Reset
               </button>
             </div>
           </div>
         </Drawer>
       )}
+
+      {/* Detail Modal */}
+      {detailOpen && detailTender && (
+        <DetailModal
+          tender={detailTender}
+          onClose={() => setDetailOpen(false)}
+          onParticipate={() => participateSelected(detailTender)}
+          postedText={fmtDate(detailTender.created)}
+          money={(usd) => fmtMoney(usd)}
+          dateFmt={(ymd) => fmtDate(ymd)}
+        />
+      )}
     </div>
   );
 }
 
-/* ================== Komponen kecil & utils ================== */
+/* ---------------- UI helpers ---------------- */
 function FilterCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="sticky top-24 rounded-2xl border border-neutral-200 bg-white p-4">
-      <div className="mb-2 text-sm font-semibold text-neutral-900">Filters</div>
+    <div className="rounded-2xl border border-neutral-200 bg-white p-4 sticky top-24">
+      <div className="mb-2 text-sm font-semibold text-neutral-900">Filter</div>
       <div className="space-y-3">{children}</div>
     </div>
   );
 }
-function FilterInput({ label, value, onChange, icon, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; icon?: React.ReactNode; placeholder?: string
+function FilterInput({
+  label,
+  value,
+  onChange,
+  icon,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  icon?: React.ReactNode;
 }) {
   return (
     <label className="block">
@@ -438,16 +559,24 @@ function FilterInput({ label, value, onChange, icon, placeholder }: {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
-          placeholder={placeholder || ''}
+          placeholder={`Cari ${label.toLowerCase()}…`}
         />
       </div>
     </label>
   );
 }
 function FilterSelect({
-  label, value, onChange, options, icon, display
+  label,
+  value,
+  onChange,
+  options,
+  icon,
 }: {
-  label: string; value: string; onChange: (v: string) => void; options: string[]; icon?: React.ReactNode; display?: (v: string) => string
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  icon?: React.ReactNode;
 }) {
   return (
     <label className="block">
@@ -461,7 +590,7 @@ function FilterSelect({
         >
           {options.map((o) => (
             <option key={o || 'all'} value={o}>
-              {display ? display(o) : (o || `All ${label}`)}
+              {o || `Semua ${label}`}
             </option>
           ))}
         </select>
@@ -469,7 +598,6 @@ function FilterSelect({
     </label>
   );
 }
-
 function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1">
@@ -478,172 +606,277 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
     </div>
   );
 }
-function InfoPill({ label, value }: { label: string; value: string }) {
+
+/* --------- Detail Modal --------- */
+function DetailModal({
+  tender,
+  postedText,
+  onClose,
+  onParticipate,
+  money,
+  dateFmt,
+}: {
+  tender: Tender;
+  postedText: string;
+  onClose: () => void;
+  onParticipate: () => void;
+  money: (usd: number) => string;
+  dateFmt: (ymd: string) => string;
+}) {
   return (
-    <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="text-sm text-neutral-900">{value}</div>
+    <div className="fixed inset-0 z-[100]">
+      <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-3 border-b border-slate-200">
+            <div className="flex justify-center mb-3">
+              <AvatarLogo name={tender.company} size={64} />
+            </div>
+            <h2 className="text-center text-lg font-semibold text-slate-900">Detail Tender</h2>
+            <p className="mt-1 text-center text-sm text-slate-600">Diposting: {postedText}</p>
+          </div>
+
+          {/* Body */}
+          <div className="max-h-[65vh] overflow-auto px-6 py-5 space-y-5">
+            <div>
+              <div className="text-xl font-bold text-slate-900">{tender.title}</div>
+              <div className="text-sm text-slate-600">{tender.company}</div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <InfoRow label="Lokasi" value={tender.location} />
+              <InfoRow label="Sektor" value={tender.sector} />
+              <InfoRow label="Kontrak" value={tender.contract} />
+              <InfoRow label="Status" value={tender.status} />
+              <InfoRow label="Deadline" value={dateFmt(tender.deadline)} />
+              <InfoRow label="Nilai Proyek" value={money(tender.budgetUSD)} />
+            </div>
+
+            <Section title="Deskripsi">
+              <RichText text={tender.description || '-'} />
+            </Section>
+
+            <Section title="Dokumen">
+              {tender.documents.length === 0 ? (
+                <div className="text-sm text-slate-600">Tidak ada dokumen.</div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {tender.documents.map((d) => (
+                    <span
+                      key={d}
+                      className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs"
+                    >
+                      <PaperIcon className="h-3 w-3" /> {d}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Tutup
+            </button>
+            <button
+              onClick={onParticipate}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Ikuti Tender
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
-function DocsList({ docs, t }: { docs?: string[]; t: ReturnType<typeof useTranslations> }) {
-  if (!docs || docs.length === 0) return <span className="text-xs text-neutral-400">{t('docs.none')}</span>;
+
+/* ---------- Small building blocks ---------- */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {docs.map((d) => (
-        <span key={d} className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs">
-          <PaperIcon className="h-3 w-3" /> {d}
-        </span>
+    <section>
+      <h3 className="mb-2 text-sm font-semibold text-slate-900">{title}</h3>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800">
+        {children}
+      </div>
+    </section>
+  );
+}
+function RichText({ text }: { text: string }) {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const isList = lines.some((l) => l.startsWith('- ') || l.startsWith('• '));
+
+  if (isList) {
+    const items = lines.map((l) => l.replace(/^[-•]\s?/, '')).filter(Boolean);
+    return (
+      <ul className="list-disc pl-5 space-y-1">
+        {items.map((it, idx) => (
+          <li key={idx}>{it}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {text.split('\n').map((p, i) => (
+        <p key={i}>{p}</p>
       ))}
     </div>
   );
 }
-function DetailPanel({
-  tender, onParticipate, onSave, saved, t, locale, labelSector, labelStatus, labelContract, fmtMoney, fmtDate
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-sm font-medium text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+/* ------------ Drawer & Empty ------------ */
+function Drawer({
+  children,
+  onClose,
+  title,
 }: {
-  tender: TenderUI | null;
-  onParticipate: () => void;
-  onSave: () => void;
-  saved: boolean;
-  t: ReturnType<typeof useTranslations>;
-  locale: string;
-  labelSector: (s: SectorUI) => string;
-  labelStatus: (s: StatusUI) => string;
-  labelContract: (s: ContractUI) => string;
-  fmtMoney: (n: number) => string;
-  fmtDate: (s: string) => string;
+  children: React.ReactNode;
+  onClose: () => void;
+  title: string;
 }) {
-  if (!tender) {
-    return (
-      <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center text-neutral-500">
-        {t('detail.empty')}
-      </div>
-    );
-  }
-  const meta = buildDeadlineMeta(tender.deadline, tender.status, t, locale);
-  return (
-    <div className="sticky top-24 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 text-sm font-bold text-white">
-          {initials(tender.buyer)}
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-neutral-900">{tender.title}</h2>
-          <p className="text-sm text-neutral-600">{tender.buyer} • {tender.location}</p>
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-        <Info label={t('labels.sector')} value={labelSector(tender.sector)} />
-        <Info label={t('labels.contract')} value={labelContract(tender.contract)} />
-        <Info label={t('labels.status')} value={labelStatus(tender.status)} />
-        <Info label={t('labels.deadline')} value={fmtDate(tender.deadline)} />
-        <Info label={t('labels.budget')} value={fmtMoney(tender.budgetUSD)} />
-        <Info label={t('labels.teamSlots')} value={t('labels.teamN', { n: tender.teamSlots })} />
-      </div>
-      <div className="mt-4">
-        <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
-          <div className={`h-full rounded-full ${meta.color}`} style={{ width: `${meta.progress}%` }} />
-        </div>
-        <div className="mt-1 text-xs text-neutral-500">{meta.progressText}</div>
-      </div>
-      <p className="mt-4 text-sm text-neutral-700">{tender.description}</p>
-      {tender.documents && tender.documents.length > 0 && (
-        <div className="mt-4">
-          <div className="mb-1 text-xs uppercase tracking-wide text-neutral-500">{t('docs.title')}</div>
-          <div className="flex flex-wrap gap-2">
-            {tender.documents.map((d) => (
-              <span key={d} className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs">
-                <PaperIcon className="h-3 w-3" /> {d}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="mt-5 space-y-2">
-        <button onClick={onParticipate} className="w-full rounded-xl bg-neutral-900 px-4 py-2.5 text-white hover:opacity-90">
-          {t('btn.participate')}
-        </button>
-        <button
-          onClick={onSave}
-          className={`w-full rounded-xl px-4 py-2.5 ${saved ? 'bg-amber-500 text-white' : 'bg-neutral-200 text-neutral-800 hover:bg-neutral-300'}`}
-        >
-          {saved ? t('btn.saved') : t('btn.saveTender')}
-        </button>
-      </div>
-    </div>
-  );
-}
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="break-words text-sm text-neutral-900">{value}</div>
-    </div>
-  );
-}
-function Drawer({ children, onClose, title }: { children: React.ReactNode; onClose: () => void; title: string }) {
   return (
     <div className="fixed inset-0 z-50 md:hidden">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-0 top-0 h-full w-[85%] max-w-xs bg-white shadow-2xl">
-        <div className="flex h-12 items-center justify-between border-b border-neutral-200 px-3">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-3 h-12">
           <div className="text-sm font-semibold">{title}</div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-neutral-200">
             <CloseIcon className="h-5 w-5" />
           </button>
         </div>
-        <div className="space-y-3 p-3">{children}</div>
+        <div className="p-3 space-y-3">{children}</div>
       </div>
     </div>
   );
 }
-function EmptyState({ t }: { t: ReturnType<typeof useTranslations> }) {
+function EmptyState() {
   return (
     <div className="rounded-3xl border border-dashed border-neutral-300 bg-white p-10 text-center">
-      <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-neutral-100">
+      <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-neutral-100 grid place-items-center">
         <SearchIcon className="h-6 w-6 text-neutral-600" />
       </div>
-      <h3 className="font-semibold text-neutral-900">{t('empty.title')}</h3>
-      <p className="mt-1 text-sm text-neutral-600">{t('empty.desc')}</p>
+      <h3 className="font-semibold text-neutral-900">Tidak ada tender</h3>
+      <p className="mt-1 text-sm text-neutral-600">Coba ubah filter atau kata kunci.</p>
     </div>
   );
 }
 
-/* ===== Icons + utils ===== */
-function SearchIcon(p: React.SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" {...p}><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function PinIcon(p: React.SVGProps<SVGSVGElement>) { return <svg viewBox="0 0 24 24" fill="none" {...p}><path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2"/></svg>; }
-function LayersIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" /><path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" /><path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" /></svg>); }
-function BriefcaseIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" /><path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" /><path d="M3 12h18" stroke="currentColor" strokeWidth="2" /></svg>); }
-function FlagIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M5 4v16M6 4h11l-2 4h-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
-function PaperIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7l-5-5Z" stroke="currentColor" strokeWidth="2" /><path d="M14 2v5h5M9 13h6M9 17h4M9 9h2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>); }
-function FilterIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M4 6h16M6 12h12M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
-function CloseIcon(p: React.SVGProps<SVGSVGElement>) { return (<svg viewBox="0 0 24 24" fill="none" {...p}><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
+/* ------------ Icons ------------ */
+function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PinIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function LayersIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" />
+      <path d="M3 12h18" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function MoneyIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M7 9h0M17 15h0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 2v4M16 2v4M3 10h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function FlagIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M5 4v16M6 4h11l-2 4h-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PaperIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7l-5-5Z" stroke="currentColor" strokeWidth="2" />
+      <path d="M14 2v5h5M9 13h6M9 17h4M9 9h2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function FilterIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M4 6h16M6 12h12M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CloseIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
+/* ------------ Utils ------------ */
 function initials(name: string) {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
-function daysBetween(a: Date, b: Date) { return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)); }
-function buildDeadlineMeta(
-  deadline: string,
-  status: StatusUI,
-  t: ReturnType<typeof useTranslations>,
-  _locale: string
-) {
-  const end = new Date(deadline + 'T00:00:00');
-  const now = new Date();
-  const total = 60;
-  const left = Math.max(0, daysBetween(now, end));
-  const progress = Math.max(0, Math.min(100, 100 - (left / total) * 100));
-  const isClosed = status === 'Closed' || end.getTime() < now.getTime();
-  const color = isClosed ? 'bg-rose-500' : left <= 7 ? 'bg-amber-500' : 'bg-emerald-500';
 
-  const progressText = isClosed
-    ? t('deadline.closed')
-    : left <= 0
-    ? t('deadline.today')
-    : t('deadline.left', { n: left });
-
-  return { progress, progressText, color };
+/* ------------ Small: Avatar Logo ------------ */
+function AvatarLogo({ name, size = 64 }: { name?: string; size?: number }) {
+  return (
+    <div
+      className="grid place-items-center rounded-full overflow-hidden bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 text-white font-bold"
+      style={{ width: size, height: size }}
+      aria-label="Company logo"
+    >
+      <span className="select-none text-xl">{initials(name || 'AW')}</span>
+    </div>
+  );
 }

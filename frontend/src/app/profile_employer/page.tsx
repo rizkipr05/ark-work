@@ -1,19 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, apiForm, API_BASE } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
 /* ====================== Types ====================== */
-type Job = {
-  id: string | number;
-  title: string;
-  location: string;
-  type: string;
-  postedAt: string;
-};
-
 type MeResp = {
   ok: boolean;
   role: 'employer';
@@ -84,8 +76,6 @@ export default function ProfileEmployerPage() {
     youtube: '',
   });
 
-  const [jobs, setJobs] = useState<Job[]>([]);
-
   // ===== modal alert (modern) =====
   const [modal, setModal] = useState<{
     type: 'ok' | 'err';
@@ -127,13 +117,6 @@ export default function ProfileEmployerPage() {
             twitter: prof?.twitter || '',
           }));
         }
-
-        // dummy jobs (ganti dengan fetch aslinya jika endpoint siap)
-        setJobs([
-          { id: 1, title: 'Senior Frontend Engineer', location: 'Jakarta', type: 'Full-time', postedAt: new Date().toISOString() },
-          { id: 2, title: 'Product Designer (UI/UX)', location: 'Remote (ID)', type: 'Full-time', postedAt: new Date(Date.now() - 86400000 * 5).toISOString() },
-          { id: 3, title: 'Recruiter / TA Specialist', location: 'Bandung', type: 'Contract', postedAt: new Date(Date.now() - 86400000 * 12).toISOString() },
-        ]);
       } catch (e) {
         console.error('[profile] load failed:', e);
         showERR('Gagal memuat profil perusahaan.');
@@ -141,13 +124,11 @@ export default function ProfileEmployerPage() {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
-  }, [user?.email]);
 
-  const dateFmt = useMemo(
-    () => new Intl.DateTimeFormat('id-ID', { year: 'numeric', month: 'short', day: '2-digit' }),
-    []
-  );
+    return () => {
+      alive = false;
+    };
+  }, [user?.email]);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -165,12 +146,18 @@ export default function ProfileEmployerPage() {
       const fd = new FormData();
       fd.append('employerId', employerId);
       fd.append('file', file);
-      const resp = await apiForm<{ ok: boolean; url: string }>('/api/employers/profile/logo', fd);
+      const resp = await apiForm<{ ok: boolean; url: string }>(
+        '/api/employers/profile/logo',
+        fd
+      );
       if (resp?.url) {
         setLogoUrl(resp.url);
         try {
           if (user?.email) {
-            localStorage.setItem(`ark_nav_avatar:${user.email}`, toAbs(resp.url));
+            localStorage.setItem(
+              `ark_nav_avatar:${user.email}`,
+              toAbs(resp.url)
+            );
             window.dispatchEvent(new Event('ark:avatar-updated'));
           }
         } catch {}
@@ -251,14 +238,15 @@ export default function ProfileEmployerPage() {
           Profil Perusahaan
         </h1>
         <p className="mb-8 max-w-2xl text-base text-slate-600 dark:text-slate-300">
-          Lengkapi informasi perusahaan Anda agar terlihat lebih profesional bagi calon kandidat.
+          Lengkapi informasi perusahaan Anda agar terlihat lebih profesional
+          bagi calon kandidat.
         </p>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-24 sm:px-6 lg:px-8">
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          {/* LEFT */}
-          <section className="space-y-8 lg:col-span-2">
+        {/* Tanpa panel "Lowongan yang Diposting" */}
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-8">
+          <section className="space-y-8">
             <Card title="Logo Perusahaan">
               <div className="flex items-center gap-6">
                 <div className="relative overflow-hidden rounded-2xl ring-1 ring-slate-200 dark:ring-slate-700">
@@ -425,7 +413,13 @@ export default function ProfileEmployerPage() {
                   Simpan Draft
                 </button>
                 <ButtonPrimary type="submit" loading={saving}>
-                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg
+                    className="mr-2 h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
                     <path d="M19 21H5a2 2 0 0 1-2-2V7l4-4h9l4 4v12a2 2 0 0 1-2 2Z" />
                     <path d="M9 21v-8h6v8M9 3v4h6V3" />
                   </svg>
@@ -434,38 +428,6 @@ export default function ProfileEmployerPage() {
               </div>
             </div>
           </section>
-
-          {/* RIGHT */}
-          <aside className="space-y-6">
-            <Card title="Lowongan yang Diposting" action={<Link href="/jobs/new" className="btn-chip">+ Posting</Link>}>
-              {jobs.length === 0 ? (
-                <Empty text="Belum ada lowongan diposting." />
-              ) : (
-                <ul className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {jobs.map((j) => (
-                    <li key={j.id} className="py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{j.title}</p>
-                          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                            {j.type} • {j.location} • {dateFmt.format(new Date(j.postedAt))}
-                          </p>
-                        </div>
-                        <Link href={`/jobs/${j.id}`} className="btn-link">Detail →</Link>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-
-            <Card>
-              <p className="text-sm text-slate-600 dark:text-slate-300">
-                Tip: Email admin bersifat khusus akun dan tidak bisa diubah dari halaman ini.
-                Hubungi dukungan atau menu Pengaturan Akun untuk mengganti email.
-              </p>
-            </Card>
-          </aside>
         </form>
       </main>
 
@@ -508,10 +470,6 @@ function Field({ label, children, className }: { label: string; children: React.
       {children}
     </label>
   );
-}
-
-function Empty({ text }: { text: string }) {
-  return <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-center text-slate-500 dark:border-slate-700">{text}</div>;
 }
 
 /* ===== Buttons ===== */

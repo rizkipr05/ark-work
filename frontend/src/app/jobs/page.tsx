@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useEffect, useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 
 /* ---------------- Server base (dukung 2 var + fallback dev) ---------------- */
 const API =
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:4000';
+  "http://localhost:4000";
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -31,10 +31,10 @@ type Job = {
   id: string | number;
   title: string;
   location: string;
-  industry: 'Oil & Gas' | 'Renewable Energy' | 'Mining';
-  contract: 'Full-time' | 'Contract' | 'Part-time';
-  function: 'Engineering' | 'Operations' | 'Management';
-  remote: 'On-site' | 'Remote' | 'Hybrid';
+  industry: "Oil & Gas" | "Renewable Energy" | "Mining";
+  contract: "Full-time" | "Contract" | "Part-time";
+  function: "Engineering" | "Operations" | "Management";
+  remote: "On-site" | "Remote" | "Hybrid";
   posted: string; // YYYY-MM-DD
   description: string;
   company?: string;
@@ -43,16 +43,19 @@ type Job = {
   salaryMax?: number | null;
   currency?: string | null;
   requirements?: string | null;
+  // NEW
+  experience?: "0-1" | "1-3" | "3-5" | "5+" | "Any";
+  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | "Any";
 };
 
-const LS_KEY = 'ark_jobs';
+const LS_KEY = "ark_jobs";
 
 type LocalJob = {
   id: string | number;
   title: string;
   company: string;
   location: string;
-  type: 'full_time' | 'part_time' | 'contract' | 'internship';
+  type: "full_time" | "part_time" | "contract" | "internship";
   remote?: boolean;
   salaryMin?: number | null;
   salaryMax?: number | null;
@@ -62,119 +65,177 @@ type LocalJob = {
   description?: string;
   requirements?: string | null;
   postedAt?: string; // ISO
-  status?: 'active' | 'closed';
+  status?: "active" | "closed";
   logo?: string | null; // data URL
+  // OPTIONAL local hints (if provided by admin/editor)
+  experienceMinYears?: number | null;
+  experienceMaxYears?: number | null;
+  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3";
 };
 
 /* ---------- Helpers & Normalizer ---------- */
-function guessIndustry(tags?: string[]): Job['industry'] {
+function guessIndustry(tags?: string[]): Job["industry"] {
   const t = (tags ?? []).map((s) => s.toLowerCase());
-  if (t.some((x) => /renewable|solar|wind|pv|geothermal|hydro/.test(x))) return 'Renewable Energy';
-  if (t.some((x) => /mining|mine|coal|nickel|mineral/.test(x))) return 'Mining';
-  return 'Oil & Gas';
+  if (t.some((x) => /renewable|solar|wind|pv|geothermal|hydro/.test(x))) return "Renewable Energy";
+  if (t.some((x) => /mining|mine|coal|nickel|mineral/.test(x))) return "Mining";
+  return "Oil & Gas";
 }
-function mapContractFromLocal(t: LocalJob['type']): Job['contract'] {
+function mapContractFromLocal(t: LocalJob["type"]): Job["contract"] {
   switch (t) {
-    case 'part_time':
-      return 'Part-time';
-    case 'contract':
-      return 'Contract';
+    case "part_time":
+      return "Part-time";
+    case "contract":
+      return "Contract";
     default:
-      return 'Full-time';
+      return "Full-time";
   }
 }
-function mapFunctionFromTextLocal(j: LocalJob): Job['function'] {
-  const txt = `${j.title} ${j.description ?? ''}`.toLowerCase();
-  if (/(manager|lead|head|director|pm)/.test(txt)) return 'Management';
-  if (/(operator|technician|maintenance|operations)/.test(txt)) return 'Operations';
-  return 'Engineering';
+function mapFunctionFromTextLocal(j: LocalJob): Job["function"] {
+  const txt = `${j.title} ${j.description ?? ""}`.toLowerCase();
+  if (/(manager|lead|head|director|pm)/.test(txt)) return "Management";
+  if (/(operator|technician|maintenance|operations)/.test(txt)) return "Operations";
+  return "Engineering";
 }
-function mapRemoteLocal(r?: boolean): Job['remote'] {
-  return r ? 'Remote' : 'On-site';
+function mapRemoteLocal(r?: boolean): Job["remote"] {
+  return r ? "Remote" : "On-site";
 }
 function isoToYmd(iso?: string): string {
   try {
     const d = iso ? new Date(iso) : new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   } catch {
-    return iso || '';
+    return iso || "";
   }
 }
+
+/* ------- Experience & Education inference ------- */
+function rangeToLabel(min?: number | null, max?: number | null): Job["experience"] {
+  if (min == null && max == null) return "Any";
+  if ((min ?? 0) <= 0 && (max ?? 1) <= 1) return "0-1";
+  if ((min ?? 0) <= 1 && (max ?? 3) <= 3) return "1-3";
+  if ((min ?? 0) <= 3 && (max ?? 5) <= 5) return "3-5";
+  return "5+";
+}
+function inferExpFromText(text?: string | null): Job["experience"] {
+  const t = (text || "").toLowerCase();
+  // patterns: "3-5 tahun", "2–3 tahun", "min 5 tahun", "5+ years", "fresh graduate"
+  const range = t.match(/(\d+)\s*[-–]\s*(\d+)\s*(tahun|year)/);
+  if (range) {
+    const a = parseInt(range[1], 10);
+    const b = parseInt(range[2], 10);
+    return rangeToLabel(a, b);
+  }
+  const minOnly = t.match(/(min(?:imal)?|>=?)\s*(\d+)\s*(tahun|year)/);
+  if (minOnly) {
+    const m = parseInt(minOnly[2], 10);
+    return rangeToLabel(m, null);
+  }
+  const plus = t.match(/(\d+)\s*\+\s*(tahun|year)/);
+  if (plus) {
+    const m = parseInt(plus[1], 10);
+    return rangeToLabel(m, null);
+  }
+  if (/fresh\s*grad|lulusan\s*baru|entry\s*level/.test(t)) return "0-1";
+  return "Any";
+}
+function inferEduFromText(text?: string | null): Job["education"] {
+  const t = (text || "").toLowerCase();
+  if (/(s3|phd|doktor)/.test(t)) return "S3";
+  if (/(s2|master|magister)/.test(t)) return "S2";
+  if (/(s1|sarjana|bachelor|strata\s*1)/.test(t)) return "S1";
+  if (/(d3|diploma\s*3)/.test(t)) return "D3";
+  if (/(sma|smk|smu|slta|high\s*school)/.test(t)) return "SMA/SMK";
+  return "Any";
+}
+
 function normalizeLocal(ls: LocalJob[]): Job[] {
   return ls
-    .filter((j) => (j.status ?? 'active') === 'active')
-    .map((j, idx) => ({
-      id: j.id ?? Date.now() + idx,
-      title: j.title,
-      company: j.company,
-      location: j.location || 'Indonesia',
-      industry: guessIndustry(j.tags),
-      contract: mapContractFromLocal(j.type),
-      function: mapFunctionFromTextLocal(j),
-      remote: mapRemoteLocal(j.remote),
-      posted: isoToYmd(j.postedAt),
-      description: j.description || '',
-      logo: j.logo ?? null,
-      salaryMin: j.salaryMin ?? null,
-      salaryMax: j.salaryMax ?? null,
-      currency: j.currency ?? 'IDR',
-      requirements: j.requirements ?? null,
-    }));
+    .filter((j) => (j.status ?? "active") === "active")
+    .map((j, idx) => {
+      const expLabel =
+        rangeToLabel(j.experienceMinYears ?? null, j.experienceMaxYears ?? null) ||
+        inferExpFromText(`${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`);
+      const eduLabel = j.education || inferEduFromText(`${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`);
+      return {
+        id: j.id ?? Date.now() + idx,
+        title: j.title,
+        company: j.company,
+        location: j.location || "Indonesia",
+        industry: guessIndustry(j.tags),
+        contract: mapContractFromLocal(j.type),
+        function: mapFunctionFromTextLocal(j),
+        remote: mapRemoteLocal(j.remote),
+        posted: isoToYmd(j.postedAt),
+        description: j.description || "",
+        logo: j.logo ?? null,
+        salaryMin: j.salaryMin ?? null,
+        salaryMax: j.salaryMax ?? null,
+        currency: j.currency ?? "IDR",
+        requirements: j.requirements ?? null,
+        experience: expLabel,
+        education: eduLabel,
+      } as Job;
+    });
 }
 
 /* ---------- Normalizer dari server DTO ---------- */
-function mapContractFromServer(e: string): Job['contract'] {
-  const v = (e || '').toLowerCase();
-  if (v.includes('part')) return 'Part-time';
-  if (v.includes('contract')) return 'Contract';
-  return 'Full-time';
+function mapContractFromServer(e: string): Job["contract"] {
+  const v = (e || "").toLowerCase();
+  if (v.includes("part")) return "Part-time";
+  if (v.includes("contract")) return "Contract";
+  return "Full-time";
 }
-function mapFunctionFromTextServer(j: JobDTO): Job['function'] {
-  const txt = `${j.title} ${j.description ?? ''}`.toLowerCase();
-  if (/(manager|lead|head|director|pm)/.test(txt)) return 'Management';
-  if (/(operator|technician|maintenance|operations)/.test(txt)) return 'Operations';
-  return 'Engineering';
+function mapFunctionFromTextServer(j: JobDTO): Job["function"] {
+  const txt = `${j.title} ${j.description ?? ""}`.toLowerCase();
+  if (/(manager|lead|head|director|pm)/.test(txt)) return "Management";
+  if (/(operator|technician|maintenance|operations)/.test(txt)) return "Operations";
+  return "Engineering";
 }
-function mapRemoteFromServer(location: string): Job['remote'] {
-  const lc = (location || '').toLowerCase();
-  if (lc.includes('remote')) return 'Remote';
-  if (lc.includes('hybrid')) return 'Hybrid';
-  return 'On-site';
+function mapRemoteFromServer(location: string): Job["remote"] {
+  const lc = (location || "").toLowerCase();
+  if (lc.includes("remote")) return "Remote";
+  if (lc.includes("hybrid")) return "Hybrid";
+  return "On-site";
 }
 function normalizeServer(arr: JobDTO[]): Job[] {
   return (arr || [])
     .filter((j) => j.isActive !== false)
-    .map((j) => ({
-      id: j.id,
-      title: j.title,
-      company: j.company,
-      location: j.location || 'Indonesia',
-      industry: 'Oil & Gas',
-      contract: mapContractFromServer(j.employment),
-      function: mapFunctionFromTextServer(j),
-      remote: mapRemoteFromServer(j.location),
-      posted: isoToYmd(j.postedAt),
-      description: j.description || '',
-      logo: j.logoUrl || null,
-      salaryMin: j.salaryMin ?? null,
-      salaryMax: j.salaryMax ?? null,
-      currency: j.currency ?? null,
-      requirements: j.requirements ?? null,
-    }));
+    .map((j) => {
+      const baseTxt = `${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`;
+      return {
+        id: j.id,
+        title: j.title,
+        company: j.company,
+        location: j.location || "Indonesia",
+        industry: "Oil & Gas",
+        contract: mapContractFromServer(j.employment),
+        function: mapFunctionFromTextServer(j),
+        remote: mapRemoteFromServer(j.location),
+        posted: isoToYmd(j.postedAt),
+        description: j.description || "",
+        logo: j.logoUrl || null,
+        salaryMin: j.salaryMin ?? null,
+        salaryMax: j.salaryMax ?? null,
+        currency: j.currency ?? null,
+        requirements: j.requirements ?? null,
+        experience: inferExpFromText(baseTxt),
+        education: inferEduFromText(baseTxt),
+      } as Job;
+    });
 }
 
 /* ------------ Formatters ------------ */
-function formatMoney(n?: number | null, curr: string = 'IDR') {
-  if (n == null) return '';
+function formatMoney(n?: number | null, curr: string = "IDR") {
+  if (n == null) return "";
   try {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: curr }).format(n);
+    return new Intl.NumberFormat("id-ID", { style: "currency", currency: curr }).format(n);
   } catch {
-    return `${curr} ${n.toLocaleString('id-ID')}`;
+    return `${curr} ${n.toLocaleString("id-ID")}`;
   }
 }
 function formatSalary(min?: number | null, max?: number | null, curr?: string | null) {
-  if (min == null && max == null) return '';
-  const c = curr || 'IDR';
+  if (min == null && max == null) return "";
+  const c = curr || "IDR";
   if (min != null && max != null) return `${formatMoney(min, c)} – ${formatMoney(max, c)}`;
   if (min != null) return `≥ ${formatMoney(min, c)}`;
   return `≤ ${formatMoney(max!, c)}`;
@@ -182,20 +243,23 @@ function formatSalary(min?: number | null, max?: number | null, curr?: string | 
 
 /* ---------------- Page ---------------- */
 export default function JobsPage() {
-  const t = useTranslations('jobs');
+  const t = useTranslations("jobs");
   const locale = useLocale();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filters, setFilters] = useState({
-    q: '',
-    loc: '',
-    industry: '',
-    contract: '',
-    func: '',
-    remote: '',
+    q: "",
+    loc: "",
+    industry: "",
+    contract: "",
+    func: "",
+    remote: "",
+    // NEW
+    exp: "", // "0-1" | "1-3" | "3-5" | "5+"
+    edu: "", // "SMA/SMK" | "D3" | "S1" | "S2" | "S3"
   });
   const [saved, setSaved] = useState<Array<string | number>>([]);
-  const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
+  const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [drawer, setDrawer] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
@@ -206,7 +270,7 @@ export default function JobsPage() {
   // baca localStorage jobs
   const readLocal = (): LocalJob[] => {
     try {
-      return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
+      return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
     } catch {
       return [];
     }
@@ -216,7 +280,7 @@ export default function JobsPage() {
     const ls = readLocal();
     const normalized = normalizeLocal(ls);
     const sorted = normalized.sort((a, b) =>
-      sort === 'newest'
+      sort === "newest"
         ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
         : new Date(a.posted).getTime() - new Date(b.posted).getTime()
     );
@@ -228,17 +292,17 @@ export default function JobsPage() {
     (async () => {
       try {
         setLoadErr(null);
-        const base = API.replace(/\/+$/, '');
+        const base = API.replace(/\/+$/, "");
 
         // 1) publik
-        const r1 = await fetch(`${base}/api/jobs?active=1`, { credentials: 'include' });
+        const r1 = await fetch(`${base}/api/jobs?active=1`, { credentials: "include" });
         if (r1.ok) {
           const j1 = await r1.json().catch(() => null);
           const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
           const mapped = normalizeServer(serverList);
           if (mapped.length > 0) {
             const sorted = mapped.sort((a, b) =>
-              sort === 'newest'
+              sort === "newest"
                 ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
                 : new Date(a.posted).getTime() - new Date(b.posted).getTime()
             );
@@ -248,10 +312,10 @@ export default function JobsPage() {
         }
 
         // 2) fallback: job milik employer (dev / logged-in)
-        const eid = localStorage.getItem('ark_employer_id');
+        const eid = localStorage.getItem("ark_employer_id");
         if (eid) {
-          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, {
-            credentials: 'include',
+          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}` ,{
+            credentials: "include",
           });
           if (r2.ok) {
             const j2 = await r2.json().catch(() => null);
@@ -259,7 +323,7 @@ export default function JobsPage() {
             const mapped2 = normalizeServer(serverList2);
             if (mapped2.length > 0) {
               const sorted = mapped2.sort((a, b) =>
-                sort === 'newest'
+                sort === "newest"
                   ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
                   : new Date(a.posted).getTime() - new Date(b.posted).getTime()
               );
@@ -272,26 +336,26 @@ export default function JobsPage() {
         // 3) local fallback
         refreshFromLocal();
       } catch (e: any) {
-        console.error('[JobsPage] load error:', e);
-        setLoadErr(e?.message || 'Gagal memuat data');
+        console.error("[JobsPage] load error:", e);
+        setLoadErr(e?.message || "Gagal memuat data");
         refreshFromLocal();
       }
     })();
 
     // saved jobs
     try {
-      setSaved(JSON.parse(localStorage.getItem('ark_saved_global') ?? '[]'));
+      setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]"));
     } catch {}
 
     // live refresh setelah posting dari form
     const onUpd = () => refreshFromLocal();
-    window.addEventListener('ark:jobs-updated', onUpd);
-    return () => window.removeEventListener('ark:jobs-updated', onUpd);
+    window.addEventListener("ark:jobs-updated", onUpd);
+    return () => window.removeEventListener("ark:jobs-updated", onUpd);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort]);
 
   const dateFmt = useMemo(
-    () => new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit' }),
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "2-digit" }),
     [locale]
   );
 
@@ -299,18 +363,20 @@ export default function JobsPage() {
     const k = filters.q.toLowerCase();
     const loc = filters.loc.toLowerCase();
 
-    const arr = jobs.filter(
-      (j) =>
-        (k === '' || j.title.toLowerCase().includes(k) || (j.company || '').toLowerCase().includes(k)) &&
-        (loc === '' || j.location.toLowerCase().includes(loc)) &&
-        (filters.industry === '' || j.industry === filters.industry) &&
-        (filters.contract === '' || j.contract === filters.contract) &&
-        (filters.func === '' || j.function === filters.func) &&
-        (filters.remote === '' || j.remote === filters.remote)
-    );
+    const arr = jobs.filter((j) => {
+      const okQ = k === "" || j.title.toLowerCase().includes(k) || (j.company || "").toLowerCase().includes(k);
+      const okLoc = loc === "" || j.location.toLowerCase().includes(loc);
+      const okInd = filters.industry === "" || j.industry === filters.industry;
+      const okCon = filters.contract === "" || j.contract === filters.contract;
+      const okFun = filters.func === "" || j.function === filters.func;
+      const okRem = filters.remote === "" || j.remote === filters.remote;
+      const okExp = filters.exp === "" || (j.experience ?? "Any") === (filters.exp as Job["experience"]);
+      const okEdu = filters.edu === "" || (j.education ?? "Any") === (filters.edu as Job["education"]);
+      return okQ && okLoc && okInd && okCon && okFun && okRem && okExp && okEdu;
+    });
 
     arr.sort((a, b) =>
-      sort === 'newest'
+      sort === "newest"
         ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
         : new Date(a.posted).getTime() - new Date(b.posted).getTime()
     );
@@ -321,10 +387,10 @@ export default function JobsPage() {
   const toggleSave = (id: string | number) => {
     const next = saved.includes(id) ? saved.filter((x) => x !== id) : [...saved, id];
     setSaved(next);
-    localStorage.setItem('ark_saved_global', JSON.stringify(next));
+    localStorage.setItem("ark_saved_global", JSON.stringify(next));
   };
   const clearFilters = () =>
-    setFilters({ q: '', loc: '', industry: '', contract: '', func: '', remote: '' });
+    setFilters({ q: "", loc: "", industry: "", contract: "", func: "", remote: "", exp: "", edu: "" });
 
   const formatPosted = (ymd: string) => {
     const d = new Date(ymd);
@@ -338,20 +404,20 @@ export default function JobsPage() {
 
   function applySelected(sel: Job | null) {
     if (!sel) return;
-    const cur = localStorage.getItem('ark_current');
+    const cur = localStorage.getItem("ark_current");
     if (!cur) {
-      alert('Silakan login terlebih dahulu untuk melamar.');
+      alert("Silakan login terlebih dahulu untuk melamar.");
       return;
     }
-    const apps = JSON.parse(localStorage.getItem('ark_apps') ?? '{}');
+    const apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
     const arr = apps[cur] ?? [];
     if (arr.find((a: any) => a.jobId === sel.id)) {
-      alert('Anda sudah melamar lowongan ini.');
+      alert("Anda sudah melamar lowongan ini.");
       return;
     }
-    arr.push({ jobId: sel.id, date: new Date().toISOString().split('T')[0] });
+    arr.push({ jobId: sel.id, date: new Date().toISOString().split("T")[0] });
     apps[cur] = arr;
-    localStorage.setItem('ark_apps', JSON.stringify(apps));
+    localStorage.setItem("ark_apps", JSON.stringify(apps));
     setDetailOpen(false);
   }
 
@@ -362,8 +428,8 @@ export default function JobsPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-neutral-900">{t('heading')}</h1>
-              <p className="text-neutral-600">{t('subheading')}</p>
+              <h1 className="text-2xl md:text-3xl font-bold text-neutral-900">{t("heading")}</h1>
+              <p className="text-neutral-600">{t("subheading")}</p>
               {loadErr && (
                 <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                   {loadErr}
@@ -380,19 +446,19 @@ export default function JobsPage() {
                 <input
                   value={filters.q}
                   onChange={(e) => setFilters((s) => ({ ...s, q: e.target.value }))}
-                  placeholder={t('search.placeholder')}
+                  placeholder={t("search.placeholder")}
                   className="w-full sm:w-80 rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-sm text-neutral-600">{t('sort.label')}</label>
+                <label className="text-sm text-neutral-600">{t("sort.label")}</label>
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as any)}
                   className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
                 >
-                  <option value="newest">{t('sort.newest')}</option>
-                  <option value="oldest">{t('sort.oldest')}</option>
+                  <option value="newest">{t("sort.newest")}</option>
+                  <option value="oldest">{t("sort.oldest")}</option>
                 </select>
               </div>
 
@@ -400,7 +466,7 @@ export default function JobsPage() {
                 onClick={() => setDrawer(true)}
                 className="sm:hidden inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
               >
-                <FilterIcon className="h-4 w-4" /> {t('filters.title')}
+                <FilterIcon className="h-4 w-4" /> {t("filters.title")}
               </button>
             </div>
           </div>
@@ -413,46 +479,61 @@ export default function JobsPage() {
         <aside className="hidden lg:col-span-3 lg:block">
           <FilterCard>
             <FilterInput
-              label={t('filters.location')}
+              label={t("filters.location")}
               value={filters.loc}
               onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
               icon={<PinIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.industry')}
+              label={t("filters.industry")}
               value={filters.industry}
               onChange={(v) => setFilters((s) => ({ ...s, industry: v }))}
-              options={['', 'Oil & Gas', 'Renewable Energy', 'Mining']}
+              options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.contract')}
+              label={t("filters.contract")}
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
-              options={['', 'Full-time', 'Contract', 'Part-time']}
+              options={["", "Full-time", "Contract", "Part-time"]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.function')}
+              label={t("filters.function")}
               value={filters.func}
               onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
-              options={['', 'Engineering', 'Operations', 'Management']}
+              options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.workmode')}
+              label={t("filters.workmode")}
               value={filters.remote}
               onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
-              options={['', 'On-site', 'Remote', 'Hybrid']}
+              options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
+            />
+            {/* NEW: Pengalaman & Pendidikan */}
+            <FilterSelect
+              label={"Pengalaman"}
+              value={filters.exp}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
+              options={["", "0-1", "1-3", "3-5", "5+"]}
+              icon={<LayersIcon className="h-4 w-4" />}
+            />
+            <FilterSelect
+              label={"Pendidikan"}
+              value={filters.edu}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
+              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              icon={<LayersIcon className="h-4 w-4" />}
             />
 
             <div className="pt-3 flex items-center justify-between">
               <span className="text-sm text-neutral-500">
-                {t('filters.results', { count: items.length })}
+                {t("filters.results", { count: items.length })}
               </span>
               <button onClick={clearFilters} className="text-sm text-blue-700 hover:underline">
-                {t('filters.clear')}
+                {t("filters.clear")}
               </button>
             </div>
           </FilterCard>
@@ -473,9 +554,9 @@ export default function JobsPage() {
                   <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
                     {job.logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img alt={job.company || 'logo'} src={job.logo} className="h-full w-full object-cover" />
+                      <img alt={job.company || "logo"} src={job.logo} className="h-full w-full object-cover" />
                     ) : (
-                      initials(job.company || 'AW')
+                      initials(job.company || "AW")
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -484,19 +565,25 @@ export default function JobsPage() {
                         <h3 className="truncate text-base md:text-lg font-semibold text-neutral-900">
                           {job.title}
                         </h3>
-                        <p className="text-sm text-neutral-600 truncate">{job.company || t('common.company')}</p>
+                        <p className="text-sm text-neutral-600 truncate">{job.company || t("common.company")}</p>
                       </div>
                       <span className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-700">
-                        {t('common.view')}
+                        {t("common.view")}
                       </span>
                     </div>
 
                     {/* meta row */}
-                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[13px]">
+                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 text-[13px]">
                       <Meta icon={<PinIcon className="h-4 w-4" />} text={job.location} />
                       <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={job.contract} />
                       <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.industry} />
                       <Meta icon={<GlobeIcon className="h-4 w-4" />} text={job.remote} />
+                      {job.experience && job.experience !== "Any" ? (
+                        <Meta icon={<CogIcon className="h-4 w-4" />} text={`${job.experience} thn`} />
+                      ) : null}
+                      {job.education && job.education !== "Any" ? (
+                        <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.education} />
+                      ) : null}
                       {job.salaryMin != null || job.salaryMax != null ? (
                         <Meta icon={<MoneyIcon className="h-4 w-4" />} text={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
                       ) : null}
@@ -506,7 +593,7 @@ export default function JobsPage() {
 
                     <div className="mt-3 flex items-center justify-between">
                       <span className="text-xs text-neutral-500">
-                        {t('common.posted', { date: formatPosted(job.posted) })}
+                        {t("common.posted", { date: formatPosted(job.posted) })}
                       </span>
                       <button
                         onClick={(e) => {
@@ -514,13 +601,13 @@ export default function JobsPage() {
                           toggleSave(job.id);
                         }}
                         className={[
-                          'rounded-lg border px-2.5 py-1 text-xs transition',
+                          "rounded-lg border px-2.5 py-1 text-xs transition",
                           saved.includes(job.id)
-                            ? 'border-amber-500 bg-amber-50 text-amber-700'
-                            : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50',
-                        ].join(' ')}
+                            ? "border-amber-500 bg-amber-50 text-amber-700"
+                            : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
+                        ].join(" ")}
                       >
-                        {saved.includes(job.id) ? t('common.saved') : t('common.save')}
+                        {saved.includes(job.id) ? t("common.saved") : t("common.save")}
                       </button>
                     </div>
                   </div>
@@ -533,48 +620,63 @@ export default function JobsPage() {
 
       {/* Drawer (mobile filters) */}
       {drawer && (
-        <Drawer onClose={() => setDrawer(false)} title={t('filters.title')}>
+        <Drawer onClose={() => setDrawer(false)} title={t("filters.title")}>
           <div className="space-y-3">
             <FilterInput
-              label={t('filters.location')}
+              label={t("filters.location")}
               value={filters.loc}
               onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
               icon={<PinIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.industry')}
+              label={t("filters.industry")}
               value={filters.industry}
               onChange={(v) => setFilters((s) => ({ ...s, industry: v }))}
-              options={['', 'Oil & Gas', 'Renewable Energy', 'Mining']}
+              options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.contract')}
+              label={t("filters.contract")}
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
-              options={['', 'Full-time', 'Contract', 'Part-time']}
+              options={["", "Full-time", "Contract", "Part-time"]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.function')}
+              label={t("filters.function")}
               value={filters.func}
               onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
-              options={['', 'Engineering', 'Operations', 'Management']}
+              options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
-              label={t('filters.workmode')}
+              label={t("filters.workmode")}
               value={filters.remote}
               onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
-              options={['', 'On-site', 'Remote', 'Hybrid']}
+              options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
+            />
+            {/* NEW (mobile): Pengalaman & Pendidikan */}
+            <FilterSelect
+              label={"Pengalaman"}
+              value={filters.exp}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
+              options={["", "0-1", "1-3", "3-5", "5+"]}
+              icon={<LayersIcon className="h-4 w-4" />}
+            />
+            <FilterSelect
+              label={"Pendidikan"}
+              value={filters.edu}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
+              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              icon={<LayersIcon className="h-4 w-4" />}
             />
             <div className="pt-2 flex items-center justify-between">
               <span className="text-sm text-neutral-500">
-                {t('filters.results', { count: items.length })}
+                {t("filters.results", { count: items.length })}
               </span>
               <button onClick={clearFilters} className="text-sm text-blue-700 hover:underline">
-                {t('filters.clear')}
+                {t("filters.clear")}
               </button>
             </div>
           </div>
@@ -596,10 +698,10 @@ export default function JobsPage() {
 
 /* ---------------- UI helpers ---------------- */
 function FilterCard({ children }: { children: React.ReactNode }) {
-  const t = useTranslations('jobs');
+  const t = useTranslations("jobs");
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4 sticky top-24">
-      <div className="mb-2 text-sm font-semibold text-neutral-900">{t('filters.title')}</div>
+      <div className="mb-2 text-sm font-semibold text-neutral-900">{t("filters.title")}</div>
       <div className="space-y-3">{children}</div>
     </div>
   );
@@ -615,7 +717,7 @@ function FilterInput({
   onChange: (v: string) => void;
   icon?: React.ReactNode;
 }) {
-  const t = useTranslations('jobs');
+  const t = useTranslations("jobs");
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
@@ -625,7 +727,7 @@ function FilterInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
-          placeholder={t('filters.placeholder', { label: label.toLowerCase() })}
+          placeholder={t("filters.placeholder", { label: label.toLowerCase() })}
         />
       </div>
     </label>
@@ -644,10 +746,10 @@ function FilterSelect({
   options: string[];
   icon?: React.ReactNode;
 }) {
-  const t = useTranslations('jobs');
+  const t = useTranslations("jobs");
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
+      <span className="mb-1 block text:[11px] uppercase tracking-wide text-neutral-500">{label}</span>
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">{icon}</span>
         <select
@@ -656,8 +758,8 @@ function FilterSelect({
           className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
         >
           {options.map((o) => (
-            <option key={o || 'all'} value={o}>
-              {o || t('filters.all', { label })}
+            <option key={o || "all"} value={o}>
+              {o || t("filters.all", { label })}
             </option>
           ))}
         </select>
@@ -716,10 +818,16 @@ function DetailModal({
               {(job.salaryMin != null || job.salaryMax != null) && (
                 <InfoRow label="Gaji" value={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
               )}
+              {job.experience && job.experience !== "Any" ? (
+                <InfoRow label="Pengalaman" value={`${job.experience} tahun`} />
+              ) : null}
+              {job.education && job.education !== "Any" ? (
+                <InfoRow label="Pendidikan" value={job.education} />
+              ) : null}
             </div>
 
             <Section title="Deskripsi Pekerjaan">
-              <RichText text={job.description || '-'} />
+              <RichText text={job.description || "-"} />
             </Section>
 
             {job.requirements ? (
@@ -762,8 +870,8 @@ function DetailModal({
 
 /* ---------- Dialog Laporkan ---------- */
 function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
-  const [reason, setReason] = useState<string>('Spam / Penipuan');
-  const [note, setNote] = useState<string>('');
+  const [reason, setReason] = useState<string>("Spam / Penipuan");
+  const [note, setNote] = useState<string>("");
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -772,9 +880,9 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
     setSending(true);
     setErr(null);
     try {
-      const res = await fetch('/api/jobs/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/jobs/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId: job.id,
           title: job.title,
@@ -788,8 +896,8 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
     } catch (e: any) {
       // fallback simpan lokal
       try {
-        const key = 'ark_job_reports';
-        const list = JSON.parse(localStorage.getItem(key) ?? '[]');
+        const key = "ark_job_reports";
+        const list = JSON.parse(localStorage.getItem(key) ?? "[]");
         list.push({
           at: new Date().toISOString(),
           jobId: job.id,
@@ -801,7 +909,7 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
         localStorage.setItem(key, JSON.stringify(list));
         setDone(true);
       } catch {
-        setErr('Gagal mengirim laporan.');
+        setErr("Gagal mengirim laporan.");
       }
     } finally {
       setSending(false);
@@ -845,11 +953,11 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
                     onChange={(e) => setReason(e.target.value)}
                   >
                     {[
-                      'Spam / Penipuan',
-                      'Informasi Menyesatkan',
-                      'Konten Tidak Pantas',
-                      'Duplikat / Sudah Tidak Aktif',
-                      'Lainnya',
+                      "Spam / Penipuan",
+                      "Informasi Menyesatkan",
+                      "Konten Tidak Pantas",
+                      "Duplikat / Sudah Tidak Aktif",
+                      "Lainnya",
                     ].map((r) => (
                       <option key={r} value={r}>
                         {r}
@@ -889,7 +997,7 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
                     disabled={sending}
                     className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                   >
-                    {sending ? 'Mengirim…' : 'Kirim Laporan'}
+                    {sending ? "Mengirim…" : "Kirim Laporan"}
                   </button>
                 </div>
               </>
@@ -913,11 +1021,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function RichText({ text }: { text: string }) {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  const isList = lines.some((l) => l.startsWith('- ') || l.startsWith('• '));
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const isList = lines.some((l) => l.startsWith("- ") || l.startsWith("• "));
 
   if (isList) {
-    const items = lines.map((l) => l.replace(/^[-•]\s?/, '')).filter(Boolean);
+    const items = lines.map((l) => l.replace(/^[-•]\s?/, "")).filter(Boolean);
     return (
       <ul className="list-disc pl-5 space-y-1">
         {items.map((it, idx) => (
@@ -929,7 +1040,7 @@ function RichText({ text }: { text: string }) {
 
   return (
     <div className="space-y-2">
-      {text.split('\n').map((p, i) => (
+      {text.split("\n").map((p, i) => (
         <p key={i}>{p}</p>
       ))}
     </div>
@@ -976,8 +1087,8 @@ function EmptyState({ t }: { t: ReturnType<typeof useTranslations> }) {
       <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-neutral-100 grid place-items-center">
         <SearchIcon className="h-6 w-6 text-neutral-600" />
       </div>
-      <h3 className="font-semibold text-neutral-900">{t('empty.title')}</h3>
-      <p className="mt-1 text-sm text-neutral-600">{t('empty.desc')}</p>
+      <h3 className="font-semibold text-neutral-900">{t("empty.title")}</h3>
+      <p className="mt-1 text-sm text-neutral-600">{t("empty.desc")}</p>
     </div>
   );
 }
@@ -1074,9 +1185,9 @@ function AvatarLogo({ name, src, size = 64 }: { name?: string; src?: string | nu
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={name || 'logo'} className="h-full w-full object-cover" />
+        <img src={src} alt={name || "logo"} className="h-full w-full object-cover" />
       ) : (
-        <span className="select-none text-xl">{initials(name || 'AW')}</span>
+        <span className="select-none text-xl">{initials(name || "AW")}</span>
       )}
     </div>
   );

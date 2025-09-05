@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 /* ---------------- Env (dukung 2 var + fallback) ---------------- */
 const API =
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:4000';
+  "http://localhost:4000";
 
 /* ---------------- Local types & const ---------------- */
 type LocalJob = {
@@ -15,7 +15,7 @@ type LocalJob = {
   title: string;
   company: string;
   location: string;
-  type: 'full_time' | 'part_time' | 'contract' | 'internship';
+  type: "full_time" | "part_time" | "contract" | "internship";
   remote?: boolean;
   salaryMin?: number | null;
   salaryMax?: number | null;
@@ -25,8 +25,12 @@ type LocalJob = {
   description?: string;
   requirements?: string;
   postedAt?: string; // ISO
-  status?: 'active' | 'closed';
+  status?: "active" | "closed";
   logo?: string | null; // data URL base64
+  // NEW
+  experienceMinYears?: number | null;
+  experienceMaxYears?: number | null;
+  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | null;
 };
 
 type CreatePayload = {
@@ -36,13 +40,31 @@ type CreatePayload = {
   description?: string;
   isDraft?: boolean;
   // backend tidak pakai semua field lokal, tapi kita simpan lokal lengkap
+  // NEW (opsional kirim ke server jika backend sudah mendukung)
+  experienceMinYears?: number | null;
+  experienceMaxYears?: number | null;
+  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  currency?: string | null;
+  tags?: string[];
+  remoteMode?: "ON_SITE" | "REMOTE" | "HYBRID"; // disederhanakan: pakai REMOTE saat checkbox true
+  company?: string;
+  deadline?: string | null;
+  requirements?: string;
 };
 
-const LS_KEY = 'ark_jobs';
+const LS_KEY = "ark_jobs";
+
+/* ---------------- Utils kecil ---------------- */
+function toIntOrNull(v: string): number | null {
+  const n = Number(String(v).replace(/[^0-9]/g, ""));
+  return Number.isFinite(n) && String(v).trim() !== "" ? n : null;
+}
 
 /* ---------------- Alert Modal (modern) ---------------- */
 function AlertModal({
-  title = 'Berhasil',
+  title = "Berhasil",
   message,
   onClose,
 }: {
@@ -77,34 +99,39 @@ function AlertModal({
 export default function NewJobPage() {
   const router = useRouter();
   const qs = useSearchParams();
-  const editId = qs.get('id'); // jika ada => mode edit
+  const editId = qs.get("id"); // jika ada => mode edit
 
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     // --- field lokal (kaya) ---
-    title: '',
-    company: '',
-    location: '',
-    type: 'full_time' as LocalJob['type'],
+    title: "",
+    company: "",
+    location: "",
+    type: "full_time" as LocalJob["type"],
     remote: false,
-    salaryMin: '',
-    salaryMax: '',
-    currency: 'IDR',
-    deadline: '',
-    tags: '', // comma separated
-    description: '',
-    requirements: '',
+    salaryMin: "",
+    salaryMax: "",
+    currency: "IDR",
+    deadline: "",
+    tags: "", // comma separated
+    description: "",
+    requirements: "",
+
+    // --- Pengalaman & Pendidikan (NEW) ---
+    experienceMinYears: "", // input string, kita parse ke number | null saat simpan
+    experienceMaxYears: "",
+    education: "" as "" | "SMA/SMK" | "D3" | "S1" | "S2" | "S3",
 
     // --- field untuk backend (sederhana) ---
-    employment: 'Full-time',
+    employment: "Full-time",
     isDraft: false,
 
     // --- logo ---
     logoFile: null as File | null,
-    logoPreview: '' as string, // data URL
+    logoPreview: "" as string, // data URL
   });
 
   function set<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
@@ -115,7 +142,7 @@ export default function NewJobPage() {
   useEffect(() => {
     if (!editId) return;
     try {
-      const arr: LocalJob[] = JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
+      const arr: LocalJob[] = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
       const cur = arr.find((j) => String(j.id) === String(editId));
       if (cur) {
         setForm((p) => ({
@@ -125,18 +152,22 @@ export default function NewJobPage() {
           location: cur.location,
           type: cur.type,
           remote: !!cur.remote,
-          salaryMin: cur.salaryMin?.toString() ?? '',
-          salaryMax: cur.salaryMax?.toString() ?? '',
-          currency: cur.currency ?? 'IDR',
-          deadline: cur.deadline ?? '',
-          tags: (cur.tags ?? []).join(', '),
-          description: cur.description ?? '',
-          requirements: cur.requirements ?? '',
+          salaryMin: cur.salaryMin?.toString() ?? "",
+          salaryMax: cur.salaryMax?.toString() ?? "",
+          currency: cur.currency ?? "IDR",
+          deadline: cur.deadline ?? "",
+          tags: (cur.tags ?? []).join(", "),
+          description: cur.description ?? "",
+          requirements: cur.requirements ?? "",
+          // NEW prefill
+          experienceMinYears: cur.experienceMinYears?.toString() ?? "",
+          experienceMaxYears: cur.experienceMaxYears?.toString() ?? "",
+          education: (cur.education ?? "") as any,
           // backend mapping (boleh diabaikan saat edit lama)
           employment: p.employment,
           isDraft: p.isDraft,
           logoFile: null,
-          logoPreview: cur.logo ?? '',
+          logoPreview: cur.logo ?? "",
         }));
       }
     } catch {}
@@ -145,17 +176,17 @@ export default function NewJobPage() {
   // handle file -> dataURL
   const onPickLogo: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const f = e.target.files?.[0] || null;
-    set('logoFile', f);
-    if (!f) return set('logoPreview', '');
+    set("logoFile", f);
+    if (!f) return set("logoPreview", "");
     const reader = new FileReader();
-    reader.onload = () => set('logoPreview', String(reader.result || ''));
+    reader.onload = () => set("logoPreview", String(reader.result || ""));
     reader.readAsDataURL(f);
   };
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!form.title.trim() || !form.company.trim() || !form.location.trim()) {
-      setToast({ type: 'err', msg: 'Judul, perusahaan, dan lokasi wajib diisi.' });
+      setToast({ type: "err", msg: "Judul, perusahaan, dan lokasi wajib diisi." });
       return;
     }
 
@@ -168,7 +199,7 @@ export default function NewJobPage() {
 
       let arr: LocalJob[] = [];
       try {
-        arr = JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
+        arr = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
       } catch {}
 
       const existing = editId ? arr.find((j) => String(j.id) === String(editId)) : undefined;
@@ -182,17 +213,21 @@ export default function NewJobPage() {
         remote: !!form.remote,
         salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
         salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
-        currency: form.currency || 'IDR',
+        currency: form.currency || "IDR",
         deadline: form.deadline || null,
         tags: form.tags
-          .split(',')
+          .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
         description: form.description,
         requirements: form.requirements,
         postedAt: existing?.postedAt ?? nowIso,
-        status: existing?.status ?? 'active',
+        status: existing?.status ?? "active",
         logo: form.logoPreview || existing?.logo || null,
+        // NEW: pengalaman & pendidikan
+        experienceMinYears: toIntOrNull(form.experienceMinYears),
+        experienceMaxYears: toIntOrNull(form.experienceMaxYears),
+        education: (form.education || null) as LocalJob["education"],
       };
 
       if (existing) {
@@ -203,14 +238,14 @@ export default function NewJobPage() {
       }
 
       localStorage.setItem(LS_KEY, JSON.stringify(arr));
-      window.dispatchEvent(new Event('ark:jobs-updated'));
+      window.dispatchEvent(new Event("ark:jobs-updated"));
 
       /* ---------------- 2) Coba kirim ke server (opsional) ---------------- */
-      const employerId = localStorage.getItem('ark_employer_id') || '';
+      const employerId = localStorage.getItem("ark_employer_id") || "";
       if (!employerId) {
         // tidak menghalangi sukses lokal — beri info di modal
         setSuccessMsg(
-          'Job tersimpan secara lokal.\nCatatan: Gagal menyimpan ke server karena tidak ada employerId (login sebagai employer dulu).'
+          "Job tersimpan secara lokal.\nCatatan: Gagal menyimpan ke server karena tidak ada employerId (login sebagai employer dulu)."
         );
         return;
       }
@@ -221,12 +256,24 @@ export default function NewJobPage() {
         employment: form.employment,
         description: form.description,
         isDraft: form.isDraft,
+        // NEW: opsional untuk backend
+        experienceMinYears: toIntOrNull(form.experienceMinYears),
+        experienceMaxYears: toIntOrNull(form.experienceMaxYears),
+        education: (form.education || null) as CreatePayload["education"],
+        salaryMin: toIntOrNull(form.salaryMin),
+        salaryMax: toIntOrNull(form.salaryMax),
+        currency: form.currency,
+        tags: localRec.tags,
+        remoteMode: form.remote ? "REMOTE" : "ON_SITE",
+        company: form.company.trim(),
+        deadline: form.deadline || null,
+        requirements: form.requirements,
       };
 
-      const res = await fetch(`${API.replace(/\/+$/, '')}/api/employer/jobs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+      const res = await fetch(`${API.replace(/\/+$/, "")}/api/employer/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           ...payloadForBackend,
           employerId,
@@ -242,12 +289,12 @@ export default function NewJobPage() {
       }
 
       // sukses server
-      setSuccessMsg('Job berhasil dipublikasikan ke server.');
+      setSuccessMsg("Job berhasil dipublikasikan ke server.");
     } catch (err: any) {
       const msg =
-        err?.message === 'Failed to fetch'
-          ? 'Job tersimpan lokal.\nCatatan: Gagal terhubung ke server. Periksa BACKEND & NEXT_PUBLIC_API_BASE/NEXT_PUBLIC_API_URL.'
-          : `Job tersimpan lokal.\nCatatan: ${err?.message || 'Gagal menyimpan ke server.'}`;
+        err?.message === "Failed to fetch"
+          ? "Job tersimpan lokal.\nCatatan: Gagal terhubung ke server. Periksa BACKEND & NEXT_PUBLIC_API_BASE/NEXT_PUBLIC_API_URL."
+          : `Job tersimpan lokal.\nCatatan: ${err?.message || "Gagal menyimpan ke server."}`;
       setSuccessMsg(msg);
     } finally {
       setBusy(false);
@@ -257,7 +304,7 @@ export default function NewJobPage() {
   return (
     <main className="min-h-[60vh] bg-slate-50">
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <h1 className="text-2xl font-semibold text-slate-900">{editId ? 'Edit Job' : 'Post a Job'}</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">{editId ? "Edit Job" : "Post a Job"}</h1>
         <p className="mt-1 text-sm text-slate-600">Isi detail lowongan untuk dipublikasikan.</p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -288,7 +335,7 @@ export default function NewJobPage() {
               <span className="mb-1 block text-xs text-slate-600">Company Name</span>
               <input
                 value={form.company}
-                onChange={(e) => set('company', e.target.value)}
+                onChange={(e) => set("company", e.target.value)}
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="PT ArkWork Indonesia"
@@ -298,7 +345,7 @@ export default function NewJobPage() {
               <span className="mb-1 block text-xs text-slate-600">Job Title</span>
               <input
                 value={form.title}
-                onChange={(e) => set('title', e.target.value)}
+                onChange={(e) => set("title", e.target.value)}
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Frontend Engineer"
@@ -312,7 +359,7 @@ export default function NewJobPage() {
               <span className="mb-1 block text-xs text-slate-600">Location</span>
               <input
                 value={form.location}
-                onChange={(e) => set('location', e.target.value)}
+                onChange={(e) => set("location", e.target.value)}
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Jakarta / Remote"
@@ -323,7 +370,7 @@ export default function NewJobPage() {
                 <span className="mb-1 block text-xs text-slate-600">Type (Local)</span>
                 <select
                   value={form.type}
-                  onChange={(e) => set('type', e.target.value as LocalJob['type'])}
+                  onChange={(e) => set("type", e.target.value as LocalJob["type"])}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="full_time">Full-time</option>
@@ -336,7 +383,7 @@ export default function NewJobPage() {
                 <span className="mb-1 block text-xs text-slate-600">Employment (Send to Server)</span>
                 <select
                   value={form.employment}
-                  onChange={(e) => set('employment', e.target.value)}
+                  onChange={(e) => set("employment", e.target.value)}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option>Full-time</option>
@@ -354,7 +401,7 @@ export default function NewJobPage() {
               <span className="mb-1 block text-xs text-slate-600">Currency</span>
               <select
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value)}
+                onChange={(e) => set("currency", e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               >
                 <option>IDR</option>
@@ -366,7 +413,7 @@ export default function NewJobPage() {
               <input
                 type="date"
                 value={form.deadline}
-                onChange={(e) => set('deadline', e.target.value)}
+                onChange={(e) => set("deadline", e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               />
             </label>
@@ -374,7 +421,7 @@ export default function NewJobPage() {
               <input
                 type="checkbox"
                 checked={form.remote}
-                onChange={(e) => set('remote', e.target.checked)}
+                onChange={(e) => set("remote", e.target.checked)}
                 className="h-4 w-4 rounded border-slate-300 text-blue-600"
               />
               Remote-friendly
@@ -389,7 +436,7 @@ export default function NewJobPage() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={form.salaryMin}
-                onChange={(e) => set('salaryMin', e.target.value)}
+                onChange={(e) => set("salaryMin", e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="10000000"
               />
@@ -400,10 +447,51 @@ export default function NewJobPage() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={form.salaryMax}
-                onChange={(e) => set('salaryMax', e.target.value)}
+                onChange={(e) => set("salaryMax", e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="20000000"
               />
+            </label>
+          </div>
+
+          {/* Pengalaman & Pendidikan (NEW) */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Experience Min (years)</span>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={form.experienceMinYears}
+                onChange={(e) => set("experienceMinYears", e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="0"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Experience Max (years)</span>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={form.experienceMaxYears}
+                onChange={(e) => set("experienceMaxYears", e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                placeholder="3"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Education</span>
+              <select
+                value={form.education}
+                onChange={(e) => set("education", e.target.value as any)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">Any</option>
+                <option value="SMA/SMK">SMA/SMK</option>
+                <option value="D3">D3</option>
+                <option value="S1">S1</option>
+                <option value="S2">S2</option>
+                <option value="S3">S3</option>
+              </select>
             </label>
           </div>
 
@@ -412,7 +500,7 @@ export default function NewJobPage() {
             <span className="mb-1 block text-xs text-slate-600">Tags (comma separated)</span>
             <input
               value={form.tags}
-              onChange={(e) => set('tags', e.target.value)}
+              onChange={(e) => set("tags", e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="react, nextjs, tailwind"
             />
@@ -423,7 +511,7 @@ export default function NewJobPage() {
             <span className="mb-1 block text-xs text-slate-600">Description</span>
             <textarea
               value={form.description}
-              onChange={(e) => set('description', e.target.value)}
+              onChange={(e) => set("description", e.target.value)}
               rows={5}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="Describe the role, team, responsibilities..."
@@ -435,7 +523,7 @@ export default function NewJobPage() {
             <span className="mb-1 block text-xs text-slate-600">Requirements</span>
             <textarea
               value={form.requirements}
-              onChange={(e) => set('requirements', e.target.value)}
+              onChange={(e) => set("requirements", e.target.value)}
               rows={5}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="e.g., 3+ years of experience, familiar with React, etc."
@@ -447,7 +535,7 @@ export default function NewJobPage() {
             <input
               type="checkbox"
               checked={form.isDraft}
-              onChange={(e) => set('isDraft', e.target.checked)}
+              onChange={(e) => set("isDraft", e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-blue-600"
             />
             Save as draft (server)
@@ -467,7 +555,7 @@ export default function NewJobPage() {
               disabled={busy}
               className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {busy ? (editId ? 'Updating…' : 'Publishing…') : editId ? 'Update Job' : 'Publish Job'}
+              {busy ? (editId ? "Updating…" : "Publishing…") : editId ? "Update Job" : "Publish Job"}
             </button>
           </div>
         </form>
@@ -478,14 +566,14 @@ export default function NewJobPage() {
         <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4">
           <div
             className={`pointer-events-auto w-full max-w-md rounded-2xl border p-4 shadow-2xl backdrop-blur ${
-              toast.type === 'ok'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                : 'border-rose-200 bg-rose-50 text-rose-900'
+              toast.type === "ok"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-rose-200 bg-rose-50 text-rose-900"
             }`}
           >
             <div className="flex items-start gap-3">
               <div className="shrink-0 h-6 w-6 rounded-full bg-black/10 grid place-items-center">
-                {toast.type === 'ok' ? '✓' : '!'}
+                {toast.type === "ok" ? "✓" : "!"}
               </div>
               <div className="flex-1 text-sm">{toast.msg}</div>
               <button onClick={() => setToast(null)} className="rounded-lg border px-2 text-xs hover:bg-white/50">
@@ -503,7 +591,7 @@ export default function NewJobPage() {
           message={successMsg}
           onClose={() => {
             setSuccessMsg(null);
-            router.push('/jobs');
+            router.push("/jobs");
           }}
         />
       )}

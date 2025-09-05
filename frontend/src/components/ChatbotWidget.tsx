@@ -188,7 +188,6 @@ export default function ChatbotWidget({ chatApi = DEFAULT_CHAT_API }: { chatApi?
               <div className="h-8 w-8 rounded-xl bg-black grid place-items-center text-white font-bold text-xs">AW</div>
               <div>
                 <div className="font-semibold text-neutral-900">ArkWork Agent</div>
-                <div className="text-xs text-neutral-500">Berita • Kerja • Konsultasi • Employer</div>
               </div>
             </div>
 

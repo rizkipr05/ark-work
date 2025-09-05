@@ -124,11 +124,12 @@ export default function Nav() {
     ],
     [t]
   );
+
+  // ⚙️ employerLinks TANPA "Settings" biar nggak dobel
   const employerLinks = useMemo(
     () => [
       { href: '/employer/jobs', label: t('emp.manageJobs', { defaultMessage: 'Manage Jobs' }) },
       { href: '/employer/billing', label: t('emp.billing', { defaultMessage: 'Billing' }) },
-      { href: '/employer/settings', label: t('emp.settings', { defaultMessage: 'Settings' }) },
     ],
     [t]
   );
@@ -325,6 +326,13 @@ export default function Nav() {
                     </span>
                   </MenuItem>
 
+                  {/* ⚙️ Settings untuk semua role */}
+                  <MenuItem href={isEmployer ? '/employer/settings' : '/settings'} onClick={() => setMenuOpen(false)}>
+                    <SettingsIcon className="h-4 w-4" />
+                    <span>{t('Setting', { defaultMessage: 'Settings' })}</span>
+                  </MenuItem>
+
+                  {/* Tambahan khusus employer (tanpa Settings) */}
                   {isEmployer && (
                     <>
                       <hr className="my-1 border-neutral-200 dark:border-neutral-800" />
@@ -474,6 +482,16 @@ export default function Nav() {
                         ? t('emp.dashboard', { defaultMessage: 'Employer Dashboard' })
                         : t('user.dashboard', { defaultMessage: 'Dashboard' })}
                     </span>
+                  </Link>
+
+                  {/* ⚙️ Settings untuk semua role (mobile) */}
+                  <Link
+                    href={isEmployer ? '/employer/settings' : '/settings'}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-900"
+                  >
+                    <SettingsIcon className="h-5 w-5" />
+                    <span>{t('user.settings', { defaultMessage: 'Settings' })}</span>
                   </Link>
 
                   {/* Tambahan khusus employer */}
@@ -657,6 +675,14 @@ function GlobeIcon(p: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" {...p}>
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth={2} />
       <path d="M3 12h18M12 3a12 12 0 0 0 0 18M12 3a12 12 0 0 1 0 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+    </svg>
+  );
+}
+function SettingsIcon(p: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...p}>
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" strokeWidth={2}/>
+      <path d="M19.4 15a7.97 7.97 0 0 0 0-6l-2.1.5a6 6 0 0 0-1.5-1.5l.5-2.1a8 8 0 0 0-6 0l.5 2.1a6 6 0 0 0-1.5 1.5l-2.1-.5a7.97 7.97 0 0 0 0 6l2.1-.5a6 6 0 0 0 1.5 1.5l-.5 2.1a8 8 0 0 0 6 0l-.5-2.1a6 6 0 0 0 1.5-1.5l2.1.5Z" stroke="currentColor" strokeWidth={2}/>
     </svg>
   );
 }

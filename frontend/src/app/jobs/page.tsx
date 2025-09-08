@@ -118,7 +118,6 @@ function rangeToLabel(min?: number | null, max?: number | null): Job["experience
 }
 function inferExpFromText(text?: string | null): Job["experience"] {
   const t = (text || "").toLowerCase();
-  // patterns: "3-5 tahun", "2–3 tahun", "min 5 tahun", "5+ years", "fresh graduate"
   const range = t.match(/(\d+)\s*[-–]\s*(\d+)\s*(tahun|year)/);
   if (range) {
     const a = parseInt(range[1], 10);
@@ -241,7 +240,7 @@ function formatSalary(min?: number | null, max?: number | null, curr?: string | 
   return `≤ ${formatMoney(max!, c)}`;
 }
 
-/* ---------------- Page ---------------- */
+/* ---------------- Page: JOBS ---------------- */
 export default function JobsPage() {
   const t = useTranslations("jobs");
   const locale = useLocale();
@@ -254,20 +253,17 @@ export default function JobsPage() {
     contract: "",
     func: "",
     remote: "",
-    // NEW
-    exp: "", // "0-1" | "1-3" | "3-5" | "5+"
-    edu: "", // "SMA/SMK" | "D3" | "S1" | "S2" | "S3"
+    exp: "",
+    edu: "",
   });
   const [saved, setSaved] = useState<Array<string | number>>([]);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [drawer, setDrawer] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  // Modal detail state
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailJob, setDetailJob] = useState<Job | null>(null);
 
-  // baca localStorage jobs
   const readLocal = (): LocalJob[] => {
     try {
       return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
@@ -287,14 +283,12 @@ export default function JobsPage() {
     setJobs(sorted);
   };
 
-  // load dari server dlu, kalau kosong/gagal => fallback local
   useEffect(() => {
     (async () => {
       try {
         setLoadErr(null);
         const base = API.replace(/\/+$/, "");
 
-        // 1) publik
         const r1 = await fetch(`${base}/api/jobs?active=1`, { credentials: "include" });
         if (r1.ok) {
           const j1 = await r1.json().catch(() => null);
@@ -311,10 +305,9 @@ export default function JobsPage() {
           }
         }
 
-        // 2) fallback: job milik employer (dev / logged-in)
         const eid = localStorage.getItem("ark_employer_id");
         if (eid) {
-          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}` ,{
+          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, {
             credentials: "include",
           });
           if (r2.ok) {
@@ -333,7 +326,6 @@ export default function JobsPage() {
           }
         }
 
-        // 3) local fallback
         refreshFromLocal();
       } catch (e: any) {
         console.error("[JobsPage] load error:", e);
@@ -342,12 +334,10 @@ export default function JobsPage() {
       }
     })();
 
-    // saved jobs
     try {
       setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]"));
     } catch {}
 
-    // live refresh setelah posting dari form
     const onUpd = () => refreshFromLocal();
     window.addEventListener("ark:jobs-updated", onUpd);
     return () => window.removeEventListener("ark:jobs-updated", onUpd);
@@ -656,7 +646,7 @@ export default function JobsPage() {
               options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
-            {/* NEW (mobile): Pengalaman & Pendidikan */}
+            {/* NEW (mobile) */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
@@ -683,7 +673,7 @@ export default function JobsPage() {
         </Drawer>
       )}
 
-      {/* Detail Modal (besar, logo perusahaan di header) */}
+      {/* Detail Modal */}
       {detailOpen && detailJob && (
         <DetailModal
           job={detailJob}
@@ -776,7 +766,7 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-/* --------- Detail Modal (besar & lengkap) + LAPORKAN --------- */
+/* --------- Detail Modal + Laporkan --------- */
 function DetailModal({
   job,
   postedText,
@@ -795,7 +785,6 @@ function DetailModal({
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]">
-          {/* Header (pakai logo perusahaan) */}
           <div className="px-6 pt-6 pb-3 border-b border-slate-200">
             <div className="flex justify-center mb-3">
               <AvatarLogo name={job.company || job.title} src={job.logo || undefined} size={64} />
@@ -804,7 +793,6 @@ function DetailModal({
             <p className="mt-1 text-center text-sm text-slate-600">{postedText}</p>
           </div>
 
-          {/* Body (scrollable) */}
           <div className="max-h-[65vh] overflow-auto px-6 py-5 space-y-5">
             <div>
               <div className="text-xl font-bold text-slate-900">{job.title}</div>
@@ -837,7 +825,6 @@ function DetailModal({
             ) : null}
           </div>
 
-          {/* Footer */}
           <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={() => setReportOpen(true)}
@@ -861,9 +848,7 @@ function DetailModal({
         </div>
       </div>
 
-      {reportOpen && (
-        <ReportDialog job={job} onClose={() => setReportOpen(false)} />
-      )}
+      {reportOpen && <ReportDialog job={job} onClose={() => setReportOpen(false)} />}
     </div>
   );
 }
@@ -893,8 +878,7 @@ function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setDone(true);
-    } catch (e: any) {
-      // fallback simpan lokal
+    } catch {
       try {
         const key = "ark_job_reports";
         const list = JSON.parse(localStorage.getItem(key) ?? "[]");
@@ -1175,7 +1159,7 @@ function initials(name: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-/* ------------ Small: Avatar Logo (dipakai header modal) ------------ */
+/* ------------ Small: Avatar Logo ------------ */
 function AvatarLogo({ name, src, size = 64 }: { name?: string; src?: string | null; size?: number }) {
   return (
     <div
@@ -1189,6 +1173,204 @@ function AvatarLogo({ name, src, size = 64 }: { name?: string; src?: string | nu
       ) : (
         <span className="select-none text-xl">{initials(name || "AW")}</span>
       )}
+    </div>
+  );
+}
+
+/* ======================================================================= */
+/* =========================  CV ATS COMPONENTS  ========================= */
+/* ======================================================================= */
+
+type CvData = {
+  name: string;
+  email: string;
+  location?: string;
+  phone?: string;
+  about?: string;
+  experience?: string;
+  education?: string;
+  organizations?: string;
+  certifications?: string;
+  skills?: string[];
+};
+
+/** Modal preview + download PDF (clean print) */
+export function CvPreviewModalATS({
+  onClose,
+  data,
+}: {
+  onClose: () => void;
+  data: CvData;
+}) {
+  const printPDF = () => window.print();
+
+  return (
+    <div className="fixed inset-0 z-[120] grid place-items-center" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative m-3 w-[min(95vw,900px)] overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 print:hidden">
+          <div className="text-sm font-medium text-neutral-800">Preview CV (ATS)</div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={printPDF}
+              className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-800"
+            >
+              Download PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[82vh] overflow-auto p-4 print:p-0">
+          <div className="cv-a4 mx-auto bg-white">
+            {/* Header (tanpa foto) */}
+            <header className="px-8 pt-10 pb-4 text-left border-b border-neutral-300">
+              <h1 className="text-2xl font-bold tracking-widest uppercase text-neutral-900">
+                {data.name || "Nama Lengkap"}
+              </h1>
+              <p className="mt-1 text-[13px] text-neutral-700">
+                {data.email}
+                {data.phone ? <> | {data.phone}</> : null}
+                {data.location ? <> | {data.location}</> : null}
+              </p>
+            </header>
+
+            <section className="px-8 py-5">
+              <CvBlock title="RINGKASAN">
+                <CvPara text={data.about || "Tuliskan ringkasan singkat tentang diri Anda: keahlian inti, minat, dan tujuan karier."} />
+              </CvBlock>
+
+              <CvBlock title="PENGALAMAN KERJA">
+                <CvPara
+                  text={
+                    data.experience ||
+                    `Contoh:
+Freelance Web Developer — Jan 2024 – Sekarang
+• Mendesain & mengembangkan website untuk klien.
+• Maintenance dan optimasi performa.`
+                  }
+                />
+              </CvBlock>
+
+              <CvBlock title="ORGANISASI">
+                <CvPara
+                  text={
+                    data.organizations ||
+                    `Contoh:
+Ketua Divisi AI — Himpunan Mahasiswa, 2025 – Sekarang
+• Menginisiasi & menyelenggarakan pelatihan mingguan seputar AI.`
+                  }
+                />
+              </CvBlock>
+
+              <CvBlock title="PENDIDIKAN">
+                <CvPara
+                  text={
+                    data.education ||
+                    `Contoh:
+Universitas X — Informatika (2021 – Sekarang)
+IPK: 3.xx/4.00`
+                  }
+                />
+              </CvBlock>
+
+              <CvBlock title="SERTIFIKASI">
+                <CvPara text={data.certifications || "Sertifikasi Profesi Junior Web Developer (BNSP) — 2024"} />
+              </CvBlock>
+
+              <CvBlock title="SKILLS">
+                {data.skills && data.skills.length > 0 ? (
+                  <ul className="flex flex-wrap gap-2 text-[13px]">
+                    {data.skills.map((s, i) => (
+                      <li key={i} className="rounded-full border border-neutral-300 px-3 py-1">
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <CvPara text="Tambahkan keahlian Anda (pisahkan dengan koma) di halaman Profile." />
+                )}
+              </CvBlock>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      {/* Print styles: bersih tanpa background / shadow */}
+      <style jsx global>{`
+        .cv-a4{
+          width: 794px;
+          min-height: 1123px;
+        }
+        @media print {
+          html, body {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            background: #fff !important;
+          }
+          * {
+            box-shadow: none !important;
+            text-shadow: none !important;
+            background: transparent !important;
+          }
+          .cv-a4{
+            width: 210mm;
+            min-height: 297mm;
+          }
+          @page {
+            size: A4;
+            margin: 12mm 14mm;
+          }
+          body > div[role="dialog"], .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ===== Helpers untuk blok & paragraf CV ===== */
+export function CvBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-5 break-inside-avoid">
+      <h2 className="mb-2 border-b border-neutral-300 pb-1 text-[13px] font-semibold tracking-wide text-neutral-800">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+export function CvPara({ text }: { text: string }) {
+  const lines = useMemo(
+    () =>
+      (text || "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    [text]
+  );
+  const isList = useMemo(() => lines.some((l) => /^[-•]/.test(l)), [lines]);
+
+  if (isList) {
+    const items = lines.map((l) => l.replace(/^[-•]\s?/, "")).filter(Boolean);
+    return (
+      <ul className="list-disc pl-5 text-[13px] leading-6 text-neutral-800">
+        {items.map((it, idx) => (
+          <li key={idx}>{it}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 text-[13px] leading-6 text-neutral-800">
+      {lines.map((l, i) => (
+        <p key={i}>{l}</p>
+      ))}
     </div>
   );
 }

@@ -671,10 +671,6 @@ IPK: 3.xx/4.00`}
             </div>
           </div>
         </div>
-
-        <p className="text-center text-xs text-neutral-500">
-          Biodata tersimpan di <strong>localStorage</strong>, Foto tersimpan di <strong>IndexedDB</strong>.
-        </p>
       </div>
 
       {/* ===== Modal Preview CV & Print ===== */}

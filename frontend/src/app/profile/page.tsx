@@ -5,20 +5,24 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 
-/** ================== Types & Const ================== */
-type BinMeta = { name: string; type: string; key: string } | null; // generic untuk cv/avatar
-type CvMeta = BinMeta;
-type AvatarMeta = BinMeta;
+/* ================== Types & Const ================== */
+type AvatarMeta = { name: string; type: string; key: string } | null;
 
 type StoredUser = {
   email: string;
   name?: string;
   profile?: {
-    location?: string;          // <- sekarang string gabungan dari WilayahSelect
+    location?: string;      
     phone?: string;
-    skills?: string;            // <- CSV dari multi-select
-    cv?: CvMeta;
+    skills?: string;        
     photo?: AvatarMeta;
+
+    // konten CV ATS
+    about?: string;
+    experience?: string;
+    education?: string;
+    organizations?: string;
+    certifications?: string;
   };
   createdAt?: string;
   updatedAt?: string;
@@ -27,121 +31,71 @@ type StoredUser = {
 const LS_KEY = 'ark_users';
 const NAV_AVATAR_KEY_PREFIX = 'ark_nav_avatar:'; // dataURL thumbnail utk navbar
 const NAV_NAME_KEY_PREFIX = 'ark_nav_name:';     // display name untuk navbar
-const MAX_CV_MB = 2;
 const MAX_AVATAR_MB = 2;
 
-const ALLOWED_CV_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-];
-
 const SKILL_OPTIONS = [
-  'Reservoir Engineering',
-  'Drilling Engineer',
-  'Completion Engineer',
-  'Well Intervention / Workover',
-  'Production Engineer',
-  'Process Engineer (Upstream)',
-  'Process Engineer (Downstream)',
-  'Piping Engineer',
-  'Pipeline Engineer',
-  'Mechanical (Static)',
-  'Mechanical (Rotating)',
-  'Electrical Engineer',
-  'Instrumentation & Control',
-  'Automation / DCS / PLC',
-  'HSE / HSEQ',
-  'QA/QC',
-  'Construction',
-  'Pre-commissioning / Commissioning',
-  'Operations',
-  'Maintenance',
-  'Reliability',
-  'Subsea',
-  'Offshore',
-  'Onshore',
-  'Flow Assurance',
-  'SURF',
-  'FPSO',
-  'LNG',
-  'Gas Processing',
-  'Refinery',
-  'Petrochemical',
-  'Geologist',
-  'Geophysicist',
-  'Mud Logging',
-  'Petrophysicist',
-  'EOR',
-  'Corrosion / Cathodic Protection',
-  'Welding / NDT',
-  'Fabrication',
-  'Marine',
-  'Procurement',
-  'Contracts',
-  'Supply Chain / Logistics',
-  'Planning / Scheduling (Primavera P6)',
-  'Cost Control',
-  'Document Control',
-  'Project Management',
+  'Reservoir Engineering', 'Drilling Engineer', 'Completion Engineer', 'Well Intervention / Workover',
+  'Production Engineer', 'Process Engineer (Upstream)', 'Process Engineer (Downstream)', 'Piping Engineer',
+  'Pipeline Engineer', 'Mechanical (Static)', 'Mechanical (Rotating)', 'Electrical Engineer',
+  'Instrumentation & Control', 'Automation / DCS / PLC', 'HSE / HSEQ', 'QA/QC', 'Construction',
+  'Pre-commissioning / Commissioning', 'Operations', 'Maintenance', 'Reliability', 'Subsea', 'Offshore', 'Onshore',
+  'Flow Assurance', 'SURF', 'FPSO', 'LNG', 'Gas Processing', 'Refinery', 'Petrochemical', 'Geologist',
+  'Geophysicist', 'Mud Logging', 'Petrophysicist', 'EOR', 'Corrosion / Cathodic Protection', 'Welding / NDT',
+  'Fabrication', 'Marine', 'Procurement', 'Contracts', 'Supply Chain / Logistics',
+  'Planning / Scheduling (Primavera P6)', 'Cost Control', 'Document Control', 'Project Management',
 ];
 
-/** ================== IndexedDB utils ================== */
+/* ================== IndexedDB (avatar saja) ================== */
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open('ark_db', 2);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains('cv_files')) db.createObjectStore('cv_files');
       if (!db.objectStoreNames.contains('avatar_files')) db.createObjectStore('avatar_files');
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
-async function idbPut(store: 'cv_files' | 'avatar_files', key: string, blob: Blob) {
+async function idbPutAvatar(key: string, blob: Blob) {
   const db = await openDB();
   await new Promise<void>((res, rej) => {
-    const tx = db.transaction(store, 'readwrite');
-    tx.objectStore(store).put(blob, key);
+    const tx = db.transaction('avatar_files', 'readwrite');
+    tx.objectStore('avatar_files').put(blob, key);
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
   });
   db.close();
 }
-async function idbGet(store: 'cv_files' | 'avatar_files', key: string): Promise<Blob | null> {
+async function idbGetAvatar(key: string): Promise<Blob | null> {
   const db = await openDB();
   const out = await new Promise<Blob | null>((res, rej) => {
-    const tx = db.transaction(store, 'readonly');
-    const r = tx.objectStore(store).get(key);
+    const tx = db.transaction('avatar_files', 'readonly');
+    const r = tx.objectStore('avatar_files').get(key);
     r.onsuccess = () => res((r.result as Blob) ?? null);
     r.onerror = () => rej(r.error);
   });
   db.close();
   return out;
 }
-async function idbDel(store: 'cv_files' | 'avatar_files', key: string) {
+async function idbDelAvatar(key: string) {
   const db = await openDB();
   await new Promise<void>((res, rej) => {
-    const tx = db.transaction(store, 'readwrite');
-    tx.objectStore(store).delete(key);
+    const tx = db.transaction('avatar_files', 'readwrite');
+    tx.objectStore('avatar_files').delete(key);
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
   });
   db.close();
 }
 
-/** ================== LocalStorage utils ================== */
+/* ================== LocalStorage utils ================== */
 const readUsers = (): StoredUser[] => {
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]'); } catch { return []; }
 };
 const writeUsers = (arr: StoredUser[]) => localStorage.setItem(LS_KEY, JSON.stringify(arr));
 
-/** ================== Shared Name helpers (sinkron dgn navbar) ================== */
+/* ================== Shared Name helpers ================== */
 function getNavName(email: string) {
   return localStorage.getItem(NAV_NAME_KEY_PREFIX + email) ?? '';
 }
@@ -150,7 +104,7 @@ function setNavName(email: string, name: string) {
   window.dispatchEvent(new Event('ark:name-updated'));
 }
 
-/** ================== Small UI helpers ================== */
+/* ================== Small UI helpers ================== */
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="mb-1.5 block text-sm font-medium text-neutral-800">{children}</label>;
 }
@@ -191,15 +145,12 @@ function ToastBanner({ toast, onClose }: { toast: Toast; onClose: () => void }) 
   );
 }
 
-/** ================== Image helpers ================== */
+/* ================== Image helpers ================== */
 async function fileToThumbDataURL(file: File | Blob, maxSize = 160): Promise<string> {
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const url = URL.createObjectURL(file);
     const im = new Image();
-    im.onload = () => {
-      URL.revokeObjectURL(url);
-      res(im);
-    };
+    im.onload = () => { URL.revokeObjectURL(url); res(im); };
     im.onerror = (e) => rej(e);
     im.src = url;
   });
@@ -213,20 +164,12 @@ async function fileToThumbDataURL(file: File | Blob, maxSize = 160): Promise<str
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-/** ================== Wilayah Select (Prov → Kab/Kota → Kec) ================== */
+/* ================== Wilayah Select ================== */
 type Opt = { id: string; name: string };
 function WilayahSelect({
-  value,
-  onChange,
-  labelProv = 'Provinsi',
-  labelKab = 'Kabupaten/Kota',
-  labelKec = 'Kecamatan',
+  value, onChange, labelProv = 'Provinsi', labelKab = 'Kabupaten/Kota', labelKec = 'Kecamatan',
 }: {
-  value: string; // string gabungan yang disimpan di profil
-  onChange: (v: string) => void;
-  labelProv?: string;
-  labelKab?: string;
-  labelKec?: string;
+  value: string; onChange: (v: string) => void; labelProv?: string; labelKab?: string; labelKec?: string;
 }) {
   const [provinces, setProvinces] = useState<Opt[]>([]);
   const [regencies, setRegencies] = useState<Opt[]>([]);
@@ -236,86 +179,46 @@ function WilayahSelect({
   const [kab, setKab] = useState<Opt | null>(null);
   const [kec, setKec] = useState<Opt | null>(null);
 
-  // Ambil provinsi
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('/api/wilayah/provinces');
-        const data = await r.json();
-        setProvinces(data.items || []);
-      } catch {
-        setProvinces([]);
-      }
-    })();
-  }, []);
+  useEffect(() => { (async () => {
+    try { const r = await fetch('/api/wilayah/provinces'); const data = await r.json(); setProvinces(data.items || []); }
+    catch { setProvinces([]); }
+  })(); }, []);
 
-  // Jika provinsi berubah -> ambil kabupaten
   useEffect(() => {
     if (!prov) { setRegencies([]); setKab(null); setDistricts([]); setKec(null); return; }
     (async () => {
-      try {
-        const r = await fetch(`/api/wilayah/regencies/${prov.id}`);
-        const data = await r.json();
-        setRegencies(data.items || []);
-        setKab(null);
-        setDistricts([]);
-        setKec(null);
-      } catch {
-        setRegencies([]); setKab(null);
-      }
+      try { const r = await fetch(`/api/wilayah/regencies/${prov.id}`); const data = await r.json();
+        setRegencies(data.items || []); setKab(null); setDistricts([]); setKec(null);
+      } catch { setRegencies([]); setKab(null); }
     })();
   }, [prov?.id]);
 
-  // Jika kabupaten berubah -> ambil kecamatan
   useEffect(() => {
     if (!kab) { setDistricts([]); setKec(null); return; }
     (async () => {
-      try {
-        const r = await fetch(`/api/wilayah/districts/${kab.id}`);
-        const data = await r.json();
-        setDistricts(data.items || []);
-        setKec(null);
-      } catch {
-        setDistricts([]); setKec(null);
-      }
+      try { const r = await fetch(`/api/wilayah/districts/${kab.id}`); const data = await r.json(); setDistricts(data.items || []); setKec(null); }
+      catch { setDistricts([]); setKec(null); }
     })();
   }, [kab?.id]);
 
-  // Gabungkan nilai untuk disimpan di profil
   useEffect(() => {
     const parts = [kec?.name, kab?.name, prov?.name].filter(Boolean);
-    onChange(parts.join(', ')); // contoh: "Cilandak, Jakarta Selatan, DKI Jakarta"
+    onChange(parts.join(', '));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prov, kab, kec]);
 
-  const Select = ({
-    value,
-    setValue,
-    options,
-    placeholder,
-    disabled
-  }: {
-    value: Opt | null;
-    setValue: (o: Opt | null) => void;
-    options: Opt[];
-    placeholder: string;
-    disabled?: boolean;
+  const Select = ({ value, setValue, options, placeholder, disabled }:{
+    value: Opt | null; setValue: (o: Opt | null) => void; options: Opt[]; placeholder: string; disabled?: boolean;
   }) => (
     <div className="relative">
       <select
         value={value?.id || ''}
-        onChange={(e) => {
-          const val = e.target.value;
-          const o = options.find((x) => x.id === val) || null;
-          setValue(o);
-        }}
+        onChange={(e) => { const val = e.target.value; const o = options.find((x) => x.id === val) || null; setValue(o); }}
         disabled={disabled}
         className="w-full appearance-none rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 pr-10 text-sm outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500"
       >
         <option value="">{placeholder}</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>{o.name}</option>
-        ))}
+        {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">▾</span>
     </div>
@@ -324,44 +227,19 @@ function WilayahSelect({
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-3">
-        <div>
-          <span className="mb-1 block text-sm text-neutral-700">{labelProv}</span>
-          <Select
-            value={prov}
-            setValue={(o)=>{ setProv(o); }}
-            options={provinces}
-            placeholder="Pilih provinsi…"
-          />
+        <div><span className="mb-1 block text-sm text-neutral-700">{labelProv}</span>
+          <Select value={prov} setValue={setProv} options={provinces} placeholder="Pilih provinsi…" />
         </div>
-        <div>
-          <span className="mb-1 block text-sm text-neutral-700">{labelKab}</span>
-          <Select
-            value={kab}
-            setValue={(o)=>{ setKab(o); }}
-            options={regencies}
-            placeholder="Pilih kab/kota…"
-            disabled={!prov}
-          />
+        <div><span className="mb-1 block text-sm text-neutral-700">{labelKab}</span>
+          <Select value={kab} setValue={setKab} options={regencies} placeholder="Pilih kab/kota…" disabled={!prov} />
         </div>
-        <div>
-          <span className="mb-1 block text-sm text-neutral-700">{labelKec}</span>
-          <Select
-            value={kec}
-            setValue={(o)=>{ setKec(o); }}
-            options={districts}
-            placeholder="Pilih kecamatan…"
-            disabled={!kab}
-          />
+        <div><span className="mb-1 block text-sm text-neutral-700">{labelKec}</span>
+          <Select value={kec} setValue={setKec} options={districts} placeholder="Pilih kecamatan…" disabled={!kab} />
         </div>
       </div>
 
-      {value && (
-        <div className="text-xs text-neutral-600">
-          Dipilih: <span className="font-medium">{value}</span>
-        </div>
-      )}
+      {value && <div className="text-xs text-neutral-600">Dipilih: <span className="font-medium">{value}</span></div>}
 
-      {/* Shortcut pilih Remote */}
       <div>
         <button
           type="button"
@@ -375,7 +253,7 @@ function WilayahSelect({
   );
 }
 
-/** ================== Page ================== */
+/* ================== Page ================== */
 export default function ProfilePage() {
   const t = useTranslations('profile');
   const { user } = useAuth();
@@ -385,22 +263,26 @@ export default function ProfilePage() {
   const notSignedIn = !email;
 
   const [name, setName] = useState('');
-  const [location, setLocation] = useState(''); // string gabungan dari WilayahSelect
+  const [location, setLocation] = useState('');
   const [phone, setPhone] = useState('');
-  const [skillTags, setSkillTags] = useState<string[]>([]); // multi-select
+  const [skillTags, setSkillTags] = useState<string[]>([]);
 
-  const [cvMeta, setCvMeta] = useState<CvMeta>(null);
-  const [cvUrl, setCvUrl] = useState<string | null>(null);
+  // konten CV ATS
+  const [about, setAbout] = useState('');
+  const [experience, setExperience] = useState('');
+  const [education, setEducation] = useState('');
+  const [organizations, setOrganizations] = useState('');
+  const [certifications, setCertifications] = useState('');
 
   const [avatarMeta, setAvatarMeta] = useState<AvatarMeta>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [busySave, setBusySave] = useState(false);
-  const [busyUploadCV, setBusyUploadCV] = useState(false);
   const [busyUploadAvatar, setBusyUploadAvatar] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
 
-  // Redirect aman
+  const [showCvPreview, setShowCvPreview] = useState(false);
+
   useEffect(() => {
     if (notSignedIn) {
       const id = setTimeout(() => router.replace('/auth/signin'), 50);
@@ -408,14 +290,13 @@ export default function ProfilePage() {
     }
   }, [notSignedIn, router]);
 
-  // auto-hide toast
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(id);
   }, [toast]);
 
-  // load biodata (PRIORITAS nama dari navbar -> fallback data user)
+  // load biodata
   useEffect(() => {
     if (!email) return;
     const users = readUsers();
@@ -426,40 +307,23 @@ export default function ProfilePage() {
     setLocation(u?.profile?.location ?? '');
     setPhone(u?.profile?.phone ?? '');
     const skillsCSV = u?.profile?.skills ?? '';
-    setSkillTags(
-      skillsCSV
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    );
-    setCvMeta(u?.profile?.cv ?? null);
+    setSkillTags(skillsCSV.split(',').map(s => s.trim()).filter(Boolean));
     setAvatarMeta(u?.profile?.photo ?? null);
+
+    setAbout(u?.profile?.about ?? '');
+    setExperience(u?.profile?.experience ?? '');
+    setEducation(u?.profile?.education ?? '');
+    setOrganizations(u?.profile?.organizations ?? '');
+    setCertifications(u?.profile?.certifications ?? '');
   }, [email]);
 
-  // objectURL CV
-  useEffect(() => {
-    let currentUrl: string | null = null;
-    let cancelled = false;
-    (async () => {
-      if (!cvMeta) { setCvUrl(null); return; }
-      const blob = await idbGet('cv_files', cvMeta.key);
-      if (!blob) { setCvUrl(null); return; }
-      currentUrl = URL.createObjectURL(blob);
-      if (!cancelled) setCvUrl(currentUrl);
-    })();
-    return () => {
-      cancelled = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
-    };
-  }, [cvMeta?.key]);
-
-  // objectURL Avatar
+  // objectURL Avatar (untuk UI profil saja — tidak tampil di CV)
   useEffect(() => {
     let currentUrl: string | null = null;
     let canceled = false;
     (async () => {
       if (!avatarMeta) { setAvatarUrl(null); return; }
-      const blob = await idbGet('avatar_files', avatarMeta.key);
+      const blob = await idbGetAvatar(avatarMeta.key);
       if (!blob) { setAvatarUrl(null); return; }
       currentUrl = URL.createObjectURL(blob);
       if (!canceled) setAvatarUrl(currentUrl);
@@ -470,51 +334,16 @@ export default function ProfilePage() {
     };
   }, [avatarMeta?.key]);
 
-  /** ========== Actions ========== */
-  async function onPickCv(file: File) {
-    if (!email) return;
-    if (!ALLOWED_CV_TYPES.includes(file.type)) {
-      setToast({ type: 'error', message: t('toast.cvTypeNotAllowed') || 'File harus PDF/DOC/DOCX' });
-      return;
-    }
-    const sizeMb = file.size / (1024 * 1024);
-    if (sizeMb > MAX_CV_MB) {
-      setToast({ type: 'error', message: (t('toast.cvTooLarge') as any) || `Ukuran maksimum ${MAX_CV_MB}MB` });
-      return;
-    }
-    setBusyUploadCV(true);
-    try {
-      const key = `cv:${email}`;
-      await idbPut('cv_files', key, file);
-      setCvMeta({ name: file.name, type: file.type, key });
-
-      const buf = await file.arrayBuffer();
-      const blob = new Blob([buf], { type: file.type });
-      const url = URL.createObjectURL(blob);
-      setCvUrl((old) => { if (old) URL.revokeObjectURL(old); return url; });
-      setToast({ type: 'success', message: t('toast.cvUploaded') || 'CV berhasil diunggah.' });
-    } catch {
-      setToast({ type: 'error', message: t('toast.failed') || 'Terjadi kesalahan.' });
-    } finally {
-      setBusyUploadCV(false);
-    }
-  }
-
+  /* ========== Actions ========== */
   async function onPickAvatar(file: File) {
     if (!email) return;
-    if (!file.type.startsWith('image/')) {
-      setToast({ type: 'error', message: 'File harus gambar (PNG/JPG/SVG).' });
-      return;
-    }
+    if (!file.type.startsWith('image/')) { setToast({ type: 'error', message: 'File harus gambar (PNG/JPG/SVG).' }); return; }
     const sizeMb = file.size / (1024 * 1024);
-    if (sizeMb > MAX_AVATAR_MB) {
-      setToast({ type: 'error', message: `Ukuran foto maksimum ${MAX_AVATAR_MB}MB` });
-      return;
-    }
+    if (sizeMb > MAX_AVATAR_MB) { setToast({ type: 'error', message: `Ukuran foto maksimum ${MAX_AVATAR_MB}MB` }); return; }
     setBusyUploadAvatar(true);
     try {
       const key = `avatar:${email}`;
-      await idbPut('avatar_files', key, file);
+      await idbPutAvatar(key, file);
       setAvatarMeta({ name: file.name, type: file.type, key });
 
       const url = URL.createObjectURL(file);
@@ -535,7 +364,7 @@ export default function ProfilePage() {
   async function removeAvatar() {
     if (!email) return;
     try {
-      if (avatarMeta?.key) await idbDel('avatar_files', avatarMeta.key);
+      if (avatarMeta?.key) await idbDelAvatar(avatarMeta.key);
       setAvatarUrl((old) => { if (old) URL.revokeObjectURL(old); return null; });
       setAvatarMeta(null);
       localStorage.removeItem(NAV_AVATAR_KEY_PREFIX + email);
@@ -561,22 +390,21 @@ export default function ProfilePage() {
       const users = readUsers();
       const now = new Date().toISOString();
       const idx = users.findIndex((x) => x.email === email);
-      // simpan skills sebagai CSV
       const skillsCSV = skillTags.join(', ');
       const data: StoredUser = {
         email,
         name,
-        profile: { location, phone, skills: skillsCSV, cv: cvMeta, photo: avatarMeta },
+        profile: {
+          location, phone, skills: skillsCSV, photo: avatarMeta,
+          about, experience, education, organizations, certifications,
+        },
         createdAt: idx >= 0 ? users[idx].createdAt : now,
         updatedAt: now,
       };
-      if (idx >= 0) users[idx] = { ...users[idx], ...data };
-      else users.push(data);
+      if (idx >= 0) users[idx] = { ...users[idx], ...data }; else users.push(data);
       writeUsers(users);
 
-      // sinkronkan nama ke navbar + trigger event
       setNavName(email, name);
-
       setToast({ type: 'success', message: t('toast.saved') || 'Tersimpan.' });
     } catch {
       setToast({ type: 'error', message: t('toast.failed') || 'Gagal menyimpan.' });
@@ -584,28 +412,6 @@ export default function ProfilePage() {
       setBusySave(false);
     }
   }
-
-  async function removeCv() {
-    if (!email) return;
-    try {
-      if (cvMeta?.key) await idbDel('cv_files', cvMeta.key);
-      setCvUrl((old) => { if (old) URL.revokeObjectURL(old); return null; });
-      setCvMeta(null);
-
-      const users = readUsers();
-      const idx = users.findIndex((x) => x.email === email);
-      if (idx >= 0) {
-        users[idx].profile = { ...users[idx].profile, cv: null };
-        users[idx].updatedAt = new Date().toISOString();
-        writeUsers(users);
-      }
-      setToast({ type: 'success', message: t('toast.cvRemoved') || 'CV dihapus.' });
-    } catch {
-      setToast({ type: 'error', message: t('toast.failed') || 'Gagal menghapus CV.' });
-    }
-  }
-
-  /** ========== UI ========== */
 
   if (notSignedIn) {
     return (
@@ -621,17 +427,23 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-neutral-50 py-10">
       <div className="mx-auto max-w-4xl space-y-6 px-4 sm:px-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">
-            {t('title') || 'Profil Saya'}
-          </h1>
-          <button
-            onClick={save}
-            disabled={busySave}
-            className="rounded-xl bg-neutral-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busySave ? (t('actions.saving') || 'Menyimpan...') : (t('actions.save') || 'Simpan')}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">{t('title') || 'Profil Saya'}</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowCvPreview(true)}
+              className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+            >
+              Preview &amp; Download CV (ATS)
+            </button>
+            <button
+              onClick={save}
+              disabled={busySave}
+              className="rounded-xl bg-neutral-900 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busySave ? (t('actions.saving') || 'Menyimpan...') : (t('actions.save') || 'Simpan')}
+            </button>
+          </div>
         </div>
 
         {/* Toast */}
@@ -639,36 +451,27 @@ export default function ProfilePage() {
 
         {/* Card */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          {/* Header row dengan avatar */}
+          {/* Avatar (opsional, tidak ikut ke CV) */}
           <div className="mb-6 flex items-center gap-5">
-            <div className="relative">
-              <div className="h-20 w-20 overflow-hidden rounded-full border border-neutral-300 bg-neutral-100">
-                {avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatarUrl} alt="avatar" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-sm text-neutral-500">
-                    {(name?.[0] || email[0] || 'U').toUpperCase()}
-                  </div>
-                )}
-              </div>
+            <div className="h-20 w-20 overflow-hidden rounded-full border border-neutral-300 bg-neutral-100">
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt="avatar" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-sm text-neutral-500">
+                  {(name?.[0] || email[0] || 'U').toUpperCase()}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex cursor-pointer items-center gap-2">
                 <span className="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800">
-                  {t('actions.changePhoto') || 'Ubah Foto'}
+                  Ubah Foto (opsional, tdk tampil di ATS)
                 </span>
                 <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    await onPickAvatar(f);
-                    e.currentTarget.value = '';
-                  }}
+                  type="file" accept="image/*" className="hidden"
+                  onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; await onPickAvatar(f); e.currentTarget.value = ''; }}
                 />
               </label>
               {avatarMeta && (
@@ -676,170 +479,120 @@ export default function ProfilePage() {
                   onClick={removeAvatar}
                   className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-700 transition hover:bg-neutral-50"
                 >
-                  {t('actions.remove') || 'Hapus'}
+                  Hapus Foto
                 </button>
               )}
-              {busyUploadAvatar && (
-                <span className="text-xs text-neutral-500">{t('actions.uploading') || 'Mengunggah...'}</span>
-              )}
+              {busyUploadAvatar && <span className="text-xs text-neutral-500">Mengunggah...</span>}
             </div>
           </div>
 
-          {/* Basic */}
+          {/* Form */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <Label>{t('fields.name') || 'Nama Lengkap'}</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('ph.name') || 'Nama lengkap'} />
+              <Label>Nama Lengkap</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama lengkap" />
             </div>
             <div>
-              <Label>{t('fields.email') || 'Email'}</Label>
+              <Label>Email</Label>
               <Input readOnly value={email ?? ''} className="bg-neutral-100" />
             </div>
 
-            {/* Lokasi: pakai API Wilayah */}
             <div className="md:col-span-2">
-              <Label>{t('fields.location') || 'Lokasi'}</Label>
+              <Label>Lokasi</Label>
               <WilayahSelect value={location} onChange={setLocation} />
             </div>
 
             <div>
-              <Label>{t('fields.phone') || 'Nomor HP'}</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('ph.phone') || '08xxxx'} />
+              <Label>Nomor HP</Label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="08xxxx" />
             </div>
 
-            {/* Skills: Multi Select + Chips */}
             <div className="md:col-span-2">
-              <Label>{t('fields.skills') || 'Keahlian (Oil & Gas)'}</Label>
+              <Label>Ringkasan (About)</Label>
+              <Textarea
+                value={about}
+                onChange={(e) => setAbout(e.target.value)}
+                placeholder="Ceritakan singkat tentang diri Anda, keahlian inti, dan tujuan."
+              />
+            </div>
 
-              {/* Selected chips */}
+            <div className="md:col-span-2">
+              <Label>Pengalaman Kerja (boleh pakai bullet • atau -)</Label>
+              <Textarea
+                value={experience}
+                onChange={(e) => setExperience(e.target.value)}
+                placeholder={`Contoh:\nFreelance Web Developer — Jan 2024 – Sekarang\n• Mendesain & mengembangkan website\n• Maintenance dan optimasi performa`}
+                rows={6}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label>Pendidikan</Label>
+              <Textarea
+                value={education}
+                onChange={(e) => setEducation(e.target.value)}
+                placeholder={`Contoh:\nUniversitas X — Informatika (2021 – Sekarang)\nIPK: 3.xx/4.00`}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label>Organisasi (opsional)</Label>
+              <Textarea
+                value={organizations}
+                onChange={(e) => setOrganizations(e.target.value)}
+                placeholder="Ketua Divisi AI — Himpunan Mahasiswa (2025 – Sekarang)…"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label>Sertifikasi</Label>
+              <Textarea
+                value={certifications}
+                onChange={(e) => setCertifications(e.target.value)}
+                placeholder="Sertifikasi Profesi Junior Web Developer (BNSP) — 2024"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label>Keahlian (Oil &amp; Gas)</Label>
               {skillTags.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {skillTags.map((s, i) => (
                     <button
-                      type="button"
-                      key={`${s}-${i}`}
+                      type="button" key={`${s}-${i}`}
                       onClick={() => setSkillTags((prev) => prev.filter((x) => x !== s))}
                       className="group inline-flex items-center gap-1 rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs text-neutral-800 hover:bg-neutral-50"
                     >
-                      #{s}
-                      <span className="text-neutral-400 group-hover:text-neutral-700">×</span>
+                      #{s} <span className="text-neutral-400 group-hover:text-neutral-700">×</span>
                     </button>
                   ))}
                 </div>
               )}
-
-              {/* Search + options */}
-              <SkillMultiSelect
-                options={SKILL_OPTIONS}
-                selected={skillTags}
-                onChange={setSkillTags}
-              />
+              <SkillMultiSelect options={SKILL_OPTIONS} selected={skillTags} onChange={setSkillTags} />
             </div>
-          </div>
-
-          {/* Divider */}
-          <div className="my-6 h-px w-full bg-neutral-200" />
-
-          {/* CV */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>{t('fields.cv') || 'Unggah CV'}</Label>
-              <span className="text-xs text-neutral-500">PDF/DOC/DOCX • Maks {MAX_CV_MB}MB • Disimpan lokal</span>
-            </div>
-
-            <label className="inline-flex cursor-pointer items-center gap-3">
-              <span className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">
-                {t('actions.chooseFile') || 'Pilih File'}
-              </span>
-              <input
-                type="file"
-                className="hidden"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  await onPickCv(f);
-                  e.currentTarget.value = '';
-                }}
-              />
-              {busyUploadCV && <span className="text-xs text-neutral-500">{t('actions.uploading') || 'Mengunggah...'}</span>}
-            </label>
-
-            {cvMeta && (
-              <div className="rounded-xl border border-neutral-200">
-                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-neutral-900" />
-                    <span className="font-medium text-neutral-800">{cvMeta.name}</span>
-                    <span className="text-neutral-400">•</span>
-                    <span className="text-neutral-500">{cvMeta.type}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {cvUrl && (
-                      <>
-                        <a
-                          href={cvUrl}
-                          download={cvMeta.name}
-                          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50"
-                        >
-                          {t('actions.download') || 'Unduh'}
-                        </a>
-                        <a
-                          href={cvUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50"
-                        >
-                          {t('actions.view') || 'Lihat'}
-                        </a>
-                      </>
-                    )}
-                    <button
-                      onClick={removeCv}
-                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50"
-                    >
-                      {t('actions.remove') || 'Hapus'}
-                    </button>
-                  </div>
-                </div>
-
-                {cvUrl && cvMeta?.type === 'application/pdf' && (
-                  <div className="h-[420px] w-full overflow-hidden rounded-b-xl border-t border-neutral-200">
-                    <iframe src={cvUrl} className="h-full w-full" title="CV Preview" />
-                  </div>
-                )}
-                {cvUrl && cvMeta?.type !== 'application/pdf' && (
-                  <p className="px-4 pb-4 text-xs text-neutral-500">
-                    {t('hints.docPreview') || 'Preview inline hanya untuk PDF. DOC/DOCX dibuka/diunduh di tab baru.'}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {!cvMeta && <p className="text-xs text-neutral-500">{t('hints.noCvYet') || 'Belum ada CV terunggah.'}</p>}
           </div>
         </div>
-
-        <p className="text-center text-xs text-neutral-500">
-          Biodata tersimpan di <strong>localStorage</strong>, Foto &amp; CV tersimpan di <strong>IndexedDB</strong>.
-        </p>
       </div>
+
+      {/* ===== Modal Preview CV ATS (tanpa foto) ===== */}
+      {showCvPreview && (
+        <AtsCvModal
+          onClose={() => setShowCvPreview(false)}
+          data={{
+            name, email: email!, location, phone, skills: skillTags,
+            about, experience, education, organizations, certifications,
+          }}
+        />
+      )}
     </div>
   );
 }
 
-/** ======= Skill Multi-Select (tanpa lib) ======= */
+/* ======= Skill Multi-Select (tanpa lib) ======= */
 function SkillMultiSelect({
-  options,
-  selected,
-  onChange,
-}: {
-  options: string[];
-  selected: string[];
-  onChange: (v: string[]) => void;
-}) {
+  options, selected, onChange,
+}: { options: string[]; selected: string[]; onChange: (v: string[]) => void; }) {
   const [query, setQuery] = useState('');
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return options.filter((o) => !selected.includes(o));
@@ -853,9 +606,7 @@ function SkillMultiSelect({
           <path d="M21 21l-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
         </svg>
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cari skill O&G…"
+          value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari skill O&G…"
           className="w-full bg-transparent text-sm outline-none placeholder-neutral-400"
         />
       </div>
@@ -868,8 +619,7 @@ function SkillMultiSelect({
             {filtered.map((opt) => (
               <li key={opt}>
                 <button
-                  type="button"
-                  onClick={() => onChange([...selected, opt])}
+                  type="button" onClick={() => onChange([...selected, opt])}
                   className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50"
                 >
                   {opt}
@@ -879,6 +629,165 @@ function SkillMultiSelect({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/* =================== ATS CV Modal (NO PHOTO) =================== */
+type CvData = {
+  name: string;
+  email: string;
+  location?: string;
+  phone?: string;
+  skills: string[];
+  about?: string;
+  experience?: string;
+  education?: string;
+  organizations?: string;
+  certifications?: string;
+};
+
+function AtsCvModal({ onClose, data }: { onClose: () => void; data: CvData }) {
+  const printPDF = () => window.print();
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative m-3 w-[min(95vw,900px)] overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* Header aksi (sembunyi saat print) */}
+        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 print:hidden">
+          <div className="text-sm font-medium text-neutral-800">Preview CV (ATS)</div>
+          <div className="flex items-center gap-2">
+            <button onClick={printPDF} className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-800">
+              Download PDF
+            </button>
+            <button onClick={onClose} className="rounded-xl border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50">
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        {/* Lembar A4 */}
+        <div className="max-h-[82vh] overflow-auto p-4 print:p-0">
+          <div className="cv-a4 mx-auto bg-white shadow print:shadow-none print:border-0">
+            {/* Header (tanpa foto) */}
+            <header className="px-10 pt-12 pb-6">
+              <h1 className="text-[26px] font-semibold text-neutral-900 tracking-wide uppercase">{data.name || 'Nama Lengkap'}</h1>
+              <p className="mt-1 text-[13px] text-neutral-800">
+                {data.email}
+                {data.phone ? ` | ${data.phone}` : ''}
+                {data.location ? ` | ${data.location}` : ''}
+              </p>
+            </header>
+
+            {/* Body */}
+            <section className="px-10 pb-10">
+              <Row>
+                <Col>
+                  <Block title="RINGKASAN">
+                    <Para text={data.about || 'Tuliskan ringkasan singkat tentang diri Anda: keahlian inti, minat, dan tujuan karier.'} />
+                  </Block>
+
+                  <Block title="PENGALAMAN KERJA">
+                    <Para text={data.experience || 'Contoh:\nFreelance Web Developer — Jan 2024 – Sekarang\n• Mendesain & mengembangkan website untuk klien.\n• Maintenance dan optimasi performa.'} />
+                  </Block>
+
+                  <Block title="ORGANISASI">
+                    <Para text={data.organizations || 'Contoh:\nKetua Divisi AI — Himpunan Mahasiswa, 2025 – Sekarang\n• Menginisiasi & menyelenggarakan pelatihan mingguan seputar AI.'} />
+                  </Block>
+                </Col>
+
+                <Col>
+                  <Block title="PENDIDIKAN">
+                    <Para text={data.education || 'Contoh:\nUniversitas X — Informatika (2021 – Sekarang)\nIPK: 3.xx/4.00'} />
+                  </Block>
+
+                  <Block title="SERTIFIKASI">
+                    <Para text={data.certifications || 'Contoh:\nSertifikasi Profesi Junior Web Developer (BNSP) — 2024'} />
+                  </Block>
+
+                  <Block title="SKILLS">
+                    {data.skills.length > 0 ? (
+                      <ul className="flex flex-wrap gap-2 text-[12.5px]">
+                        {data.skills.map((s, i) => (
+                          <li key={i} className="rounded border border-neutral-300 px-2.5 py-0.5">{s}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <Para text="Tambahkan keahlian Anda di halaman Profile (pisahkan dengan koma)." />
+                    )}
+                  </Block>
+                </Col>
+              </Row>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      {/* Print styles */}
+      <style jsx global>{`
+        .cv-a4{
+          width: 794px;
+          min-height: 1123px;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+        }
+        @media print {
+          .cv-a4{
+            width: 210mm;
+            min-height: 297mm;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            page-break-inside: avoid;
+          }
+          @page {
+            size: A4;
+            margin: 12mm 14mm;
+          }
+          body > div[role="dialog"], .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ===== Layout helpers untuk CV (2 kolom responsif) ===== */
+function Row({ children }: { children: React.ReactNode }) {
+  return <div className="grid gap-6 md:grid-cols-2">{children}</div>;
+}
+function Col({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-5">{children}</div>;
+}
+
+/* ===== Helpers untuk blok & paragraf CV ===== */
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="break-inside-avoid">
+      <h2 className="mb-2 border-b border-neutral-300 pb-1 text-[12.5px] font-semibold tracking-[.06em] text-neutral-800">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+function Para({ text }: { text: string }) {
+  const lines = useMemo(() => (text || '').split('\n').map((l) => l.trim()).filter(Boolean), [text]);
+  const isList = useMemo(() => lines.some((l) => /^[-•]/.test(l)), [lines]);
+
+  if (isList) {
+    const items = lines.map((l) => l.replace(/^[-•]\s?/, '')).filter(Boolean);
+    return (
+      <ul className="list-disc pl-5 text-[13px] leading-6 text-neutral-800">
+        {items.map((it, idx) => <li key={idx}>{it}</li>)}
+      </ul>
+    );
+  }
+  return (
+    <div className="space-y-1.5 text-[13px] leading-6 text-neutral-800">
+      {lines.map((l, i) => <p key={i}>{l}</p>)}
     </div>
   );
 }

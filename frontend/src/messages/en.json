@@ -449,7 +449,5 @@
     "empty": { "title": "No tenders found", "desc": "Try changing filters or keywords." },
     "results": "{count} results",
     "participate": { "alert": "Interested in participating: {title}\nPlease upload documents in the next step." }
-  },
-
-  "kirim-ulang": {}
+  }
 }

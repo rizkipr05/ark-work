@@ -449,5 +449,7 @@
     "empty": { "title": "Tidak ada tender", "desc": "Coba ubah filter atau kata kunci." },
     "results": "{count} hasil",
     "participate": { "alert": "Berminat ikut serta: {title}\nSilakan unggah dokumen pada langkah berikutnya." }
-  }
+  },
+
+  "kirim-ulang": {}
 }

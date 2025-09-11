@@ -39,6 +39,12 @@ async function readErrorMessage(res: Response) {
   }
 }
 
+export const API = (path: string) => {
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+  return `${base}${path}`;
+};
+
+
 /* ====================== Main fetch wrapper ====================== */
 /**
  * Contoh:

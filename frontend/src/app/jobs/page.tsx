@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { API } from "@/lib/api"; // <-- dipakai oleh ReportDialog baru
 
-/* ---------------- Server base (dukung 2 var + fallback dev) ---------------- */
-const API =
+/* ---------------- Server base ---------------- */
+const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:4000";
+  (process.env.NODE_ENV === "development" ? "http://localhost:4000" : "");
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -20,7 +21,6 @@ type JobDTO = {
   company: string;
   logoUrl: string | null;
   isActive: boolean;
-  // opsional
   salaryMin?: number | null;
   salaryMax?: number | null;
   currency?: string | null;
@@ -28,22 +28,21 @@ type JobDTO = {
 };
 
 type Job = {
-  id: string | number;
+  id: string;
   title: string;
   location: string;
   industry: "Oil & Gas" | "Renewable Energy" | "Mining";
   contract: "Full-time" | "Contract" | "Part-time";
   function: "Engineering" | "Operations" | "Management";
   remote: "On-site" | "Remote" | "Hybrid";
-  posted: string; // YYYY-MM-DD
+  posted: string; // ISO string
   description: string;
   company?: string;
-  logo?: string | null; // data URL atau URL
+  logo?: string | null;
   salaryMin?: number | null;
   salaryMax?: number | null;
   currency?: string | null;
   requirements?: string | null;
-  // NEW
   experience?: "0-1" | "1-3" | "3-5" | "5+" | "Any";
   education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | "Any";
 };
@@ -66,8 +65,7 @@ type LocalJob = {
   requirements?: string | null;
   postedAt?: string; // ISO
   status?: "active" | "closed";
-  logo?: string | null; // data URL
-  // OPTIONAL local hints (if provided by admin/editor)
+  logo?: string | null;
   experienceMinYears?: number | null;
   experienceMaxYears?: number | null;
   education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3";
@@ -92,20 +90,23 @@ function mapContractFromLocal(t: LocalJob["type"]): Job["contract"] {
 }
 function mapFunctionFromTextLocal(j: LocalJob): Job["function"] {
   const txt = `${j.title} ${j.description ?? ""}`.toLowerCase();
-  if (/(manager|lead|head|director|pm)/.test(txt)) return "Management";
-  if (/(operator|technician|maintenance|operations)/.test(txt)) return "Operations";
+  if (/\b(manager|lead|head|director|product\s*manager|pm)\b/.test(txt)) return "Management";
+  if (/\b(operator|technician|maintenance|operations?)\b/.test(txt)) return "Operations";
   return "Engineering";
 }
 function mapRemoteLocal(r?: boolean): Job["remote"] {
   return r ? "Remote" : "On-site";
 }
-function isoToYmd(iso?: string): string {
+function isoStore(iso?: string): string {
   try {
-    const d = iso ? new Date(iso) : new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return new Date(iso ?? Date.now()).toISOString();
   } catch {
     return iso || "";
   }
+}
+function sortByPosted(a: Job, b: Job, newest = true) {
+  const da = Date.parse(a.posted), db = Date.parse(b.posted);
+  return newest ? db - da : da - db;
 }
 
 /* ------- Experience & Education inference ------- */
@@ -118,32 +119,22 @@ function rangeToLabel(min?: number | null, max?: number | null): Job["experience
 }
 function inferExpFromText(text?: string | null): Job["experience"] {
   const t = (text || "").toLowerCase();
-  const range = t.match(/(\d+)\s*[-–]\s*(\d+)\s*(tahun|year)/);
-  if (range) {
-    const a = parseInt(range[1], 10);
-    const b = parseInt(range[2], 10);
-    return rangeToLabel(a, b);
-  }
-  const minOnly = t.match(/(min(?:imal)?|>=?)\s*(\d+)\s*(tahun|year)/);
-  if (minOnly) {
-    const m = parseInt(minOnly[2], 10);
-    return rangeToLabel(m, null);
-  }
-  const plus = t.match(/(\d+)\s*\+\s*(tahun|year)/);
-  if (plus) {
-    const m = parseInt(plus[1], 10);
-    return rangeToLabel(m, null);
-  }
-  if (/fresh\s*grad|lulusan\s*baru|entry\s*level/.test(t)) return "0-1";
+  const range = t.match(/(\d+)\s*[-–]\s*(\d+)\s*(tahun|thn|year|years|yrs?)\b/);
+  if (range) return rangeToLabel(+range[1], +range[2]);
+  const minOnly = t.match(/\b(min(?:imal)?|>=?)\s*(\d+)\s*(tahun|thn|years?|yrs?)\b/);
+  if (minOnly) return rangeToLabel(+minOnly[2], null);
+  const plus = t.match(/(\d+)\s*\+\s*(tahun|thn|years?|yrs?)\b/);
+  if (plus) return rangeToLabel(+plus[1], null);
+  if (/\b(fresh\s*grad|lulusan\s*baru|entry[-\s]*level)\b/.test(t)) return "0-1";
   return "Any";
 }
 function inferEduFromText(text?: string | null): Job["education"] {
   const t = (text || "").toLowerCase();
-  if (/(s3|phd|doktor)/.test(t)) return "S3";
-  if (/(s2|master|magister)/.test(t)) return "S2";
-  if (/(s1|sarjana|bachelor|strata\s*1)/.test(t)) return "S1";
-  if (/(d3|diploma\s*3)/.test(t)) return "D3";
-  if (/(sma|smk|smu|slta|high\s*school)/.test(t)) return "SMA/SMK";
+  if (/\b(s3|phd|doktor)\b/.test(t)) return "S3";
+  if (/\b(s2|master|magister|m\.?sc|m\.?eng)\b/.test(t)) return "S2";
+  if (/\b(s1|sarjana|bachelor|strata\s*1|b\.?sc|b\.?eng)\b/.test(t)) return "S1";
+  if (/\b(d3|diploma\s*3)\b/.test(t)) return "D3";
+  if (/\b(sma|smk|smu|slta|high\s*school)\b/.test(t)) return "SMA/SMK";
   return "Any";
 }
 
@@ -156,7 +147,7 @@ function normalizeLocal(ls: LocalJob[]): Job[] {
         inferExpFromText(`${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`);
       const eduLabel = j.education || inferEduFromText(`${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`);
       return {
-        id: j.id ?? Date.now() + idx,
+        id: String(j.id ?? Date.now() + idx),
         title: j.title,
         company: j.company,
         location: j.location || "Indonesia",
@@ -164,7 +155,7 @@ function normalizeLocal(ls: LocalJob[]): Job[] {
         contract: mapContractFromLocal(j.type),
         function: mapFunctionFromTextLocal(j),
         remote: mapRemoteLocal(j.remote),
-        posted: isoToYmd(j.postedAt),
+        posted: isoStore(j.postedAt),
         description: j.description || "",
         logo: j.logo ?? null,
         salaryMin: j.salaryMin ?? null,
@@ -186,14 +177,14 @@ function mapContractFromServer(e: string): Job["contract"] {
 }
 function mapFunctionFromTextServer(j: JobDTO): Job["function"] {
   const txt = `${j.title} ${j.description ?? ""}`.toLowerCase();
-  if (/(manager|lead|head|director|pm)/.test(txt)) return "Management";
-  if (/(operator|technician|maintenance|operations)/.test(txt)) return "Operations";
+  if (/\b(manager|lead|head|director|pm)\b/.test(txt)) return "Management";
+  if (/\b(operator|technician|maintenance|operations?)\b/.test(txt)) return "Operations";
   return "Engineering";
 }
-function mapRemoteFromServer(location: string): Job["remote"] {
-  const lc = (location || "").toLowerCase();
-  if (lc.includes("remote")) return "Remote";
-  if (lc.includes("hybrid")) return "Hybrid";
+function mapRemoteFromServer(location: string, title?: string, desc?: string): Job["remote"] {
+  const lc = `${location} ${title ?? ""} ${desc ?? ""}`.toLowerCase();
+  if (/\bremote\b/.test(lc)) return "Remote";
+  if (/\bhybrid\b/.test(lc)) return "Hybrid";
   return "On-site";
 }
 function normalizeServer(arr: JobDTO[]): Job[] {
@@ -202,15 +193,15 @@ function normalizeServer(arr: JobDTO[]): Job[] {
     .map((j) => {
       const baseTxt = `${j.title} ${j.requirements ?? ""} ${j.description ?? ""}`;
       return {
-        id: j.id,
+        id: String(j.id),
         title: j.title,
         company: j.company,
         location: j.location || "Indonesia",
         industry: "Oil & Gas",
         contract: mapContractFromServer(j.employment),
         function: mapFunctionFromTextServer(j),
-        remote: mapRemoteFromServer(j.location),
-        posted: isoToYmd(j.postedAt),
+        remote: mapRemoteFromServer(j.location, j.title, j.description),
+        posted: isoStore(j.postedAt),
         description: j.description || "",
         logo: j.logoUrl || null,
         salaryMin: j.salaryMin ?? null,
@@ -225,19 +216,20 @@ function normalizeServer(arr: JobDTO[]): Job[] {
 
 /* ------------ Formatters ------------ */
 function formatMoney(n?: number | null, curr: string = "IDR") {
-  if (n == null) return "";
+  if (n == null || Number.isNaN(n)) return "";
   try {
     return new Intl.NumberFormat("id-ID", { style: "currency", currency: curr }).format(n);
   } catch {
-    return `${curr} ${n.toLocaleString("id-ID")}`;
+    return `${curr} ${Number(n).toLocaleString("id-ID")}`;
   }
 }
 function formatSalary(min?: number | null, max?: number | null, curr?: string | null) {
-  if (min == null && max == null) return "";
   const c = curr || "IDR";
+  if (min == null && max == null) return "";
   if (min != null && max != null) return `${formatMoney(min, c)} – ${formatMoney(max, c)}`;
   if (min != null) return `≥ ${formatMoney(min, c)}`;
-  return `≤ ${formatMoney(max!, c)}`;
+  if (max != null) return `≤ ${formatMoney(max, c)}`;
+  return "";
 }
 
 /* ---------------- Page: JOBS ---------------- */
@@ -256,13 +248,22 @@ export default function JobsPage() {
     exp: "",
     edu: "",
   });
-  const [saved, setSaved] = useState<Array<string | number>>([]);
+  const [saved, setSaved] = useState<string[]>([]);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [drawer, setDrawer] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailJob, setDetailJob] = useState<Job | null>(null);
+
+  // NEW: Report dialog state (pakai ReportDialog baru)
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportDefaults, setReportDefaults] = useState<{
+    judul?: string;
+    perusahaan?: string;
+    alasan?: string;
+    catatan?: string;
+  }>({});
 
   const readLocal = (): LocalJob[] => {
     try {
@@ -275,73 +276,63 @@ export default function JobsPage() {
   const refreshFromLocal = () => {
     const ls = readLocal();
     const normalized = normalizeLocal(ls);
-    const sorted = normalized.sort((a, b) =>
-      sort === "newest"
-        ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
-        : new Date(a.posted).getTime() - new Date(b.posted).getTime()
-    );
+    const sorted = normalized.sort((a, b) => sortByPosted(a, b, sort === "newest"));
     setJobs(sorted);
   };
 
   useEffect(() => {
+    const ac = new AbortController(); let alive = true;
     (async () => {
       try {
         setLoadErr(null);
-        const base = API.replace(/\/+$/, "");
+        const base = (API_BASE || "").replace(/\/+$/, "");
+        const opts = { credentials: "include", signal: ac.signal } as const;
 
-        const r1 = await fetch(`${base}/api/jobs?active=1`, { credentials: "include" });
-        if (r1.ok) {
-          const j1 = await r1.json().catch(() => null);
-          const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
-          const mapped = normalizeServer(serverList);
-          if (mapped.length > 0) {
-            const sorted = mapped.sort((a, b) =>
-              sort === "newest"
-                ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
-                : new Date(a.posted).getTime() - new Date(b.posted).getTime()
-            );
-            setJobs(sorted);
-            return;
-          }
-        }
-
-        const eid = localStorage.getItem("ark_employer_id");
-        if (eid) {
-          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, {
-            credentials: "include",
-          });
-          if (r2.ok) {
-            const j2 = await r2.json().catch(() => null);
-            const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
-            const mapped2 = normalizeServer(serverList2);
-            if (mapped2.length > 0) {
-              const sorted = mapped2.sort((a, b) =>
-                sort === "newest"
-                  ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
-                  : new Date(a.posted).getTime() - new Date(b.posted).getTime()
-              );
-              setJobs(sorted);
+        if (base) {
+          const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
+          if (alive && r1.ok) {
+            const j1 = await r1.json().catch(() => null);
+            const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
+            const mapped = normalizeServer(serverList);
+            if (mapped.length > 0) {
+              setJobs(mapped.sort((a, b) => sortByPosted(a, b, sort === "newest")));
               return;
             }
           }
+          const eid = localStorage.getItem("ark_employer_id");
+          if (eid) {
+            const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
+            if (alive && r2.ok) {
+              const j2 = await r2.json().catch(() => null);
+              const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
+              const mapped2 = normalizeServer(serverList2);
+              if (mapped2.length > 0) {
+                setJobs(mapped2.sort((a, b) => sortByPosted(a, b, sort === "newest")));
+                return;
+              }
+            }
+          }
         }
-
-        refreshFromLocal();
+        if (alive) refreshFromLocal();
       } catch (e: any) {
-        console.error("[JobsPage] load error:", e);
-        setLoadErr(e?.message || "Gagal memuat data");
-        refreshFromLocal();
+        if (!ac.signal.aborted) {
+          console.error("[JobsPage] load error:", e);
+          setLoadErr(e?.message || "Gagal memuat data");
+          refreshFromLocal();
+        }
       }
     })();
 
     try {
-      setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]"));
+      setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
     } catch {}
 
     const onUpd = () => refreshFromLocal();
     window.addEventListener("ark:jobs-updated", onUpd);
-    return () => window.removeEventListener("ark:jobs-updated", onUpd);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      ac.abort();
+      window.removeEventListener("ark:jobs-updated", onUpd);
+    };
   }, [sort]);
 
   const dateFmt = useMemo(
@@ -365,26 +356,23 @@ export default function JobsPage() {
       return okQ && okLoc && okInd && okCon && okFun && okRem && okExp && okEdu;
     });
 
-    arr.sort((a, b) =>
-      sort === "newest"
-        ? new Date(b.posted).getTime() - new Date(a.posted).getTime()
-        : new Date(a.posted).getTime() - new Date(b.posted).getTime()
-    );
+    arr.sort((a, b) => sortByPosted(a, b, sort === "newest"));
 
     return arr;
   }, [jobs, filters, sort]);
 
   const toggleSave = (id: string | number) => {
-    const next = saved.includes(id) ? saved.filter((x) => x !== id) : [...saved, id];
+    const key = String(id);
+    const next = saved.includes(key) ? saved.filter((x) => x !== key) : [...saved, key];
     setSaved(next);
     localStorage.setItem("ark_saved_global", JSON.stringify(next));
   };
   const clearFilters = () =>
     setFilters({ q: "", loc: "", industry: "", contract: "", func: "", remote: "", exp: "", edu: "" });
 
-  const formatPosted = (ymd: string) => {
-    const d = new Date(ymd);
-    return isNaN(d.getTime()) ? ymd : dateFmt.format(d);
+  const formatPosted = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : dateFmt.format(d);
   };
 
   function openDetail(job: Job) {
@@ -409,6 +397,17 @@ export default function JobsPage() {
     apps[cur] = arr;
     localStorage.setItem("ark_apps", JSON.stringify(apps));
     setDetailOpen(false);
+  }
+
+  // Dipanggil dari DetailModal saat tombol "Laporkan" di-klik
+  function onReport(job: Job) {
+    setReportDefaults({
+      judul: job.title,
+      perusahaan: job.company ?? "",
+      alasan: "Spam / Penipuan",
+      catatan: "",
+    });
+    setReportOpen(true);
   }
 
   return (
@@ -491,30 +490,26 @@ export default function JobsPage() {
             <FilterSelect
               label={t("filters.function")}
               value={filters.func}
-              onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
-              options={["", "Engineering", "Operations", "Management"]}
+              onChange={(v) => setFilters((s) => ({ ...s, func: v }))} options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.workmode")}
               value={filters.remote}
-              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
-              options={["", "On-site", "Remote", "Hybrid"]}
+              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))} options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
             {/* NEW: Pengalaman & Pendidikan */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
-              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
-              options={["", "0-1", "1-3", "3-5", "5+"]}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))} options={["", "0-1", "1-3", "3-5", "5+"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={"Pendidikan"}
               value={filters.edu}
-              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
-              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))} options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
 
@@ -592,12 +587,12 @@ export default function JobsPage() {
                         }}
                         className={[
                           "rounded-lg border px-2.5 py-1 text-xs transition",
-                          saved.includes(job.id)
+                          saved.includes(String(job.id))
                             ? "border-amber-500 bg-amber-50 text-amber-700"
                             : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
                         ].join(" ")}
                       >
-                        {saved.includes(job.id) ? t("common.saved") : t("common.save")}
+                        {saved.includes(String(job.id)) ? t("common.saved") : t("common.save")}
                       </button>
                     </div>
                   </div>
@@ -615,50 +610,43 @@ export default function JobsPage() {
             <FilterInput
               label={t("filters.location")}
               value={filters.loc}
-              onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
-              icon={<PinIcon className="h-4 w-4" />}
+              onChange={(v) => setFilters((s) => ({ ...s, loc: v }))} icon={<PinIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.industry")}
               value={filters.industry}
-              onChange={(v) => setFilters((s) => ({ ...s, industry: v }))}
-              options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
+              onChange={(v) => setFilters((s) => ({ ...s, industry: v }))} options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.contract")}
               value={filters.contract}
-              onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
-              options={["", "Full-time", "Contract", "Part-time"]}
+              onChange={(v) => setFilters((s) => ({ ...s, contract: v }))} options={["", "Full-time", "Contract", "Part-time"]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.function")}
               value={filters.func}
-              onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
-              options={["", "Engineering", "Operations", "Management"]}
+              onChange={(v) => setFilters((s) => ({ ...s, func: v }))} options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.workmode")}
               value={filters.remote}
-              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
-              options={["", "On-site", "Remote", "Hybrid"]}
+              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))} options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
             {/* NEW (mobile) */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
-              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
-              options={["", "0-1", "1-3", "3-5", "5+"]}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))} options={["", "0-1", "1-3", "3-5", "5+"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={"Pendidikan"}
               value={filters.edu}
-              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
-              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))} options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <div className="pt-2 flex items-center justify-between">
@@ -680,8 +668,20 @@ export default function JobsPage() {
           onClose={() => setDetailOpen(false)}
           onApply={() => applySelected(detailJob)}
           postedText={formatPosted(detailJob.posted)}
+          onReport={() => onReport(detailJob)} // <<-- panggil dialog laporan baru
         />
       )}
+
+      {/* Report Dialog (baru, dari kode kamu) */}
+      <ReportDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        defaultData={reportDefaults}
+        onSubmitted={() => {
+          setReportOpen(false);
+          alert("Terima kasih. Laporanmu telah kami terima.");
+        }}
+      />
     </div>
   );
 }
@@ -697,16 +697,8 @@ function FilterCard({ children }: { children: React.ReactNode }) {
   );
 }
 function FilterInput({
-  label,
-  value,
-  onChange,
-  icon,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  icon?: React.ReactNode;
-}) {
+  label, value, onChange, icon,
+}: { label: string; value: string; onChange: (v: string) => void; icon?: React.ReactNode; }) {
   const t = useTranslations("jobs");
   return (
     <label className="block">
@@ -714,8 +706,7 @@ function FilterInput({
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">{icon}</span>
         <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={value} onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
           placeholder={t("filters.placeholder", { label: label.toLowerCase() })}
         />
@@ -724,27 +715,16 @@ function FilterInput({
   );
 }
 function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-  icon,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  icon?: React.ReactNode;
-}) {
+  label, value, onChange, options, icon,
+}: { label: string; value: string; onChange: (v: string) => void; options: string[]; icon?: React.ReactNode; }) {
   const t = useTranslations("jobs");
   return (
     <label className="block">
-      <span className="mb-1 block text:[11px] uppercase tracking-wide text-neutral-500">{label}</span>
+      <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">{label}</span>
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">{icon}</span>
         <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={value} onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-3 py-2 text-sm outline-none focus:border-neutral-400"
         >
           {options.map((o) => (
@@ -766,25 +746,16 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-/* --------- Detail Modal + Laporkan --------- */
+/* --------- Detail Modal (tanpa ReportDialog internal) --------- */
 function DetailModal({
-  job,
-  postedText,
-  onClose,
-  onApply,
-}: {
-  job: Job;
-  postedText: string;
-  onClose: () => void;
-  onApply: () => void;
-}) {
-  const [reportOpen, setReportOpen] = useState(false);
+  job, postedText, onClose, onApply, onReport,
+}: { job: Job; postedText: string; onClose: () => void; onApply: () => void; onReport: () => void; }) {
 
   return (
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4">
-        <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]">
+        <div className="w-full max-w-2xl rounded-2xl bg-white shadow-[0_15px_70px_-15px_rgba(0,0,0,0.5)]" role="dialog" aria-modal>
           <div className="px-6 pt-6 pb-3 border-b border-slate-200">
             <div className="flex justify-center mb-3">
               <AvatarLogo name={job.company || job.title} src={job.logo || undefined} size={64} />
@@ -827,7 +798,7 @@ function DetailModal({
 
           <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
-              onClick={() => setReportOpen(true)}
+              onClick={onReport}
               className="rounded-xl border border-red-500 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
             >
               Laporkan
@@ -847,152 +818,11 @@ function DetailModal({
           </div>
         </div>
       </div>
-
-      {reportOpen && <ReportDialog job={job} onClose={() => setReportOpen(false)} />}
     </div>
   );
 }
 
-/* ---------- Dialog Laporkan ---------- */
-function ReportDialog({ job, onClose }: { job: Job; onClose: () => void }) {
-  const [reason, setReason] = useState<string>("Spam / Penipuan");
-  const [note, setNote] = useState<string>("");
-  const [sending, setSending] = useState(false);
-  const [done, setDone] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submitReport() {
-    setSending(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/jobs/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId: job.id,
-          title: job.title,
-          company: job.company,
-          reason,
-          note,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setDone(true);
-    } catch {
-      try {
-        const key = "ark_job_reports";
-        const list = JSON.parse(localStorage.getItem(key) ?? "[]");
-        list.push({
-          at: new Date().toISOString(),
-          jobId: job.id,
-          title: job.title,
-          company: job.company,
-          reason,
-          note,
-        });
-        localStorage.setItem(key, JSON.stringify(list));
-        setDone(true);
-      } catch {
-        setErr("Gagal mengirim laporan.");
-      }
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[120]">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 h-12">
-            <div className="text-sm font-semibold">Laporkan Lowongan</div>
-            <button
-              onClick={onClose}
-              className="grid h-9 w-9 place-items-center rounded-lg border border-neutral-200 hover:bg-neutral-50"
-            >
-              <CloseIcon className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="p-4 space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-              <div className="font-medium text-slate-900">{job.title}</div>
-              <div className="text-slate-600">{job.company}</div>
-            </div>
-
-            {done ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                Terima kasih. Laporanmu telah kami terima.
-              </div>
-            ) : (
-              <>
-                <label className="block">
-                  <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">
-                    Alasan
-                  </span>
-                  <select
-                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                  >
-                    {[
-                      "Spam / Penipuan",
-                      "Informasi Menyesatkan",
-                      "Konten Tidak Pantas",
-                      "Duplikat / Sudah Tidak Aktif",
-                      "Lainnya",
-                    ].map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">
-                    Catatan (opsional)
-                  </span>
-                  <textarea
-                    className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400 min-h-[90px]"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Tambahkan detail yang membantu tim kami meninjau laporanmu."
-                  />
-                </label>
-
-                {err && (
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
-                    {err}
-                  </div>
-                )}
-
-                <div className="pt-1 flex items-center justify-end gap-2">
-                  <button
-                    onClick={onClose}
-                    disabled={sending}
-                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    onClick={submitReport}
-                    disabled={sending}
-                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-                  >
-                    {sending ? "Mengirim…" : "Kirim Laporan"}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/* ---------- Section / RichText / InfoRow ---------- */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
@@ -1003,13 +833,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </section>
   );
 }
-
 function RichText({ text }: { text: string }) {
   const lines = text
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const isList = lines.some((l) => l.startsWith("- ") || l.startsWith("• "));
+  const isList = lines.length > 0 && lines.every((l) => /^[-•]\s+/.test(l));
 
   if (isList) {
     const items = lines.map((l) => l.replace(/^[-•]\s?/, "")).filter(Boolean);
@@ -1030,7 +859,6 @@ function RichText({ text }: { text: string }) {
     </div>
   );
 }
-
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -1042,21 +870,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 /* ------------ Drawer & Empty ------------ */
 function Drawer({
-  children,
-  onClose,
-  title,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-  title: string;
-}) {
+  children, onClose, title,
+}: { children: React.ReactNode; onClose: () => void; title: string; }) {
   return (
     <div className="fixed inset-0 z-50 md:hidden">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute left-0 top-0 h-full w-[85%] max-w-xs bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-neutral-200 px-3 h-12">
           <div className="text-sm font-semibold">{title}</div>
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg border border-neutral-200">
+          <button onClick={onClose} aria-label="Tutup filter" className="grid h-9 w-9 place-items-center rounded-lg border border-neutral-200">
             <CloseIcon className="h-5 w-5" />
           </button>
         </div>
@@ -1078,79 +900,61 @@ function EmptyState({ t }: { t: ReturnType<typeof useTranslations> }) {
 }
 
 /* ------------ Icons ------------ */
-function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-      <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function PinIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2" />
-      <circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function LayersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" />
-      <path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" />
-      <path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
-      <path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" />
-      <path d="M3 12h18" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function MoneyIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
-      <path d="M7 9h0M17 15h0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CogIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="2" />
-      <path d="M19.4 15a7.97 7.97 0 000-6l-2.1.5a6 6 0 00-1.5-1.5l.5-2.1a8 8 0 00-6 0l.5 2.1a6 6 0 001.5-1.5l-2.1-.5a7.97 7.97 0 000 6l2.1-.5z" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function GlobeIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-      <path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function FilterIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M4 6h16M6 12h12M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CloseIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
+function SearchIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+    <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+); }
+function PinIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2" />
+    <circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2" />
+  </svg>
+); }
+function LayersIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" />
+    <path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+    <path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+  </svg>
+); }
+function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+    <path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" />
+    <path d="M3 12h18" stroke="currentColor" strokeWidth="2" />
+  </svg>
+); }
+function MoneyIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+    <path d="M7 9h0M17 15h0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+); }
+function CogIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="2" />
+    <path d="M19.4 15a7.97 7.97 0 000-6l-2.1.5a6 6 0 00-1.5-1.5l.5-2.1a8 8 0 00-6 0l.5 2.1a6 6 0 001.5-1.5l-2.1-.5a7.97 7.97 0 000 6l2.1-.5z" stroke="currentColor" strokeWidth="2" />
+  </svg>
+); }
+function GlobeIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+    <path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" stroke="currentColor" strokeWidth="2" />
+  </svg>
+); }
+function FilterIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <path d="M4 6h16M6 12h12M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+); }
+function CloseIcon(props: React.SVGProps<SVGSVGElement>) { return (
+  <svg viewBox="0 0 24 24" fill="none" {...props}>
+    <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+); }
 
 /* ------------ Utils ------------ */
 function initials(name: string) {
@@ -1194,14 +998,7 @@ type CvData = {
   skills?: string[];
 };
 
-/** Modal preview + download PDF (clean print) */
-export function CvPreviewModalATS({
-  onClose,
-  data,
-}: {
-  onClose: () => void;
-  data: CvData;
-}) {
+export function CvPreviewModalATS({ onClose, data }: { onClose: () => void; data: CvData; }) {
   const printPDF = () => window.print();
 
   return (
@@ -1228,7 +1025,6 @@ export function CvPreviewModalATS({
 
         <div className="max-h-[82vh] overflow-auto p-4 print:p-0">
           <div className="cv-a4 mx-auto bg-white">
-            {/* Header (tanpa foto) */}
             <header className="px-8 pt-10 pb-4 text-left border-b border-neutral-300">
               <h1 className="text-2xl font-bold tracking-widest uppercase text-neutral-900">
                 {data.name || "Nama Lengkap"}
@@ -1301,31 +1097,13 @@ IPK: 3.xx/4.00`
         </div>
       </div>
 
-      {/* Print styles: bersih tanpa background / shadow */}
       <style jsx global>{`
-        .cv-a4{
-          width: 794px;
-          min-height: 1123px;
-        }
+        .cv-a4{ width: 794px; min-height: 1123px; }
         @media print {
-          html, body {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            background: #fff !important;
-          }
-          * {
-            box-shadow: none !important;
-            text-shadow: none !important;
-            background: transparent !important;
-          }
-          .cv-a4{
-            width: 210mm;
-            min-height: 297mm;
-          }
-          @page {
-            size: A4;
-            margin: 12mm 14mm;
-          }
+          html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
+          * { box-shadow: none !important; text-shadow: none !important; background: transparent !important; }
+          .cv-a4{ width: 210mm; min-height: 297mm; }
+          @page { size: A4; margin: 12mm 14mm; }
           body > div[role="dialog"], .print\\:hidden { display: none !important; }
         }
       `}</style>
@@ -1333,7 +1111,6 @@ IPK: 3.xx/4.00`
   );
 }
 
-/* ===== Helpers untuk blok & paragraf CV ===== */
 export function CvBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-5 break-inside-avoid">
@@ -1371,6 +1148,122 @@ export function CvPara({ text }: { text: string }) {
       {lines.map((l, i) => (
         <p key={i}>{l}</p>
       ))}
+    </div>
+  );
+}
+
+/* ========================== ReportDialog (BARU) ========================== */
+type ReportDialogProps = {
+  open: boolean;
+  onClose: () => void;
+  onSubmitted?: (payload: any) => void;
+  defaultData?: { judul?: string; perusahaan?: string; alasan?: string; catatan?: string };
+};
+
+function ReportDialog({ open, onClose, onSubmitted, defaultData }: ReportDialogProps) {
+  const [judul, setJudul] = useState(defaultData?.judul || "");
+  const [perusahaan, setPerusahaan] = useState(defaultData?.perusahaan || "");
+  const [alasan, setAlasan] = useState(defaultData?.alasan || "Spam / Penipuan");
+  const [catatan, setCatatan] = useState(defaultData?.catatan || "");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setJudul(defaultData?.judul || "");
+      setPerusahaan(defaultData?.perusahaan || "");
+      setAlasan(defaultData?.alasan || "Spam / Penipuan");
+      setCatatan(defaultData?.catatan || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch(API("/reports"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ judul, perusahaan, alasan, catatan }),
+      });
+      if (!res.ok) throw new Error("Gagal mengirim laporan");
+      const created = await res.json();
+      onSubmitted?.(created);
+      onClose();
+    } catch (err: any) {
+      alert(err?.message || "Terjadi kesalahan");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" role="dialog" aria-modal>
+      <div className="w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h2 className="text-lg font-semibold">Laporkan Lowongan</h2>
+          <button
+            onClick={onClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100"
+            aria-label="Tutup"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="mt-4 space-y-4">
+          <div className="grid gap-2 rounded-xl border p-3">
+            <div className="text-sm text-gray-500">RINGKASAN LOWONGAN</div>
+            <input
+              required value={judul} onChange={(e) => setJudul(e.target.value)}
+              placeholder="Judul lowongan (contoh: Backend)"
+              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
+            />
+            <input
+              required value={perusahaan} onChange={(e) => setPerusahaan(e.target.value)}
+              placeholder="Nama perusahaan (contoh: hempart)"
+              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <label className="text-sm font-medium">Alasan</label>
+            <select
+              value={alasan} onChange={(e) => setAlasan(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
+            >
+              <option>Spam / Penipuan</option>
+              <option>Konten Tidak Pantas</option>
+              <option>Informasi Palsu</option>
+              <option>Duplikat</option>
+              <option>Lainnya</option>
+            </select>
+          </div>
+
+          <div className="grid gap-2">
+            <label className="text-sm font-medium">Catatan (opsional)</label>
+            <textarea
+              value={catatan} onChange={(e) => setCatatan(e.target.value)}
+              placeholder="Tambahkan detail yang membantu tim kami meninjau laporanmu."
+              rows={4} className="w-full resize-y rounded-xl border px-3 py-2 focus:outline-none focus:ring"
+            />
+          </div>
+
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2 hover:bg-gray-50">
+              Batal
+            </button>
+            <button
+              disabled={loading} type="submit"
+              className="rounded-xl bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {loading ? "Mengirim..." : "Kirim Laporan"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

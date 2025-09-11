@@ -366,3 +366,16 @@ enum OnboardingStep {
 
   @@map("onboarding_step")
 }
+
+model Report {
+  id          String   @id @default(uuid())
+  judul       String
+  perusahaan  String
+  alasan      String
+  catatan     String?
+  status      String   @default("baru")
+  dibuatPada  DateTime @default(now())
+
+  @@index([status])
+  @@map("reports") // opsional nama tabel
+}

@@ -18,6 +18,7 @@ import paymentsRouter from './routes/payments';
 import tendersRouter from './routes/tenders';
 import adminTendersRouter from './routes/admin-tenders';
 import { jobsRouter } from './routes/jobs';
+import reportsRouter from "./routes/reports";
 
 // Role guards (optional)
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -73,6 +74,9 @@ app.use('/auth', authRouter);
 
 // Admin auth / dashboard
 app.use('/admin', adminRouter);
+
+// Mount routes
+app.use("/api/reports", reportsRouter);
 
 // News & Chat
 app.use('/api/news', newsRouter);

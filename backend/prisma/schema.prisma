@@ -1,3 +1,5 @@
+// schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -29,7 +31,7 @@ model Admin {
 }
 
 model Tender {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   title       String
   buyer       String
   sector      Sector
@@ -38,11 +40,11 @@ model Tender {
   contract    Contract
   budgetUSD   Int
   deadline    DateTime
-  teamSlots   Int
-  description String
-  documents   String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  teamSlots   Int       @default(0)          // ✅ default biar tidak wajib dikirim
+  description String    @default("")         // ✅ aman kalau kosong
+  documents   String[]  @default([])         // ✅ aman kalau kosong
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 /// ===================== Employer =====================
@@ -306,7 +308,7 @@ model Session {
   @@map("sessions")
 }
 
-/// ===================== Tender =====================
+/// ===================== Tender Enums =====================
 enum Sector {
   OIL_GAS
   RENEWABLE_ENERGY
@@ -367,6 +369,7 @@ enum OnboardingStep {
   @@map("onboarding_step")
 }
 
+/// ===================== Reports =====================
 model Report {
   id          String   @id @default(uuid())
   judul       String
@@ -377,5 +380,5 @@ model Report {
   dibuatPada  DateTime @default(now())
 
   @@index([status])
-  @@map("reports") // opsional nama tabel
+  @@map("reports")
 }

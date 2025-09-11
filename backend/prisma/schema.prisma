@@ -1,5 +1,3 @@
-// schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -31,20 +29,20 @@ model Admin {
 }
 
 model Tender {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   title       String
   buyer       String
   sector      Sector
   location    String
   status      Status
   contract    Contract
-  budgetUSD   Int
   deadline    DateTime
-  teamSlots   Int       @default(0)          // ✅ default biar tidak wajib dikirim
-  description String    @default("")         // ✅ aman kalau kosong
-  documents   String[]  @default([])         // ✅ aman kalau kosong
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  description String   @default("")
+  documents   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  teamSlots   Int      @default(0)
+  budgetUSD   BigInt   @map("budget_usd")
 }
 
 /// ===================== Employer =====================
@@ -308,6 +306,20 @@ model Session {
   @@map("sessions")
 }
 
+/// ===================== Reports =====================
+model Report {
+  id         String   @id @default(uuid())
+  judul      String
+  perusahaan String
+  alasan     String
+  catatan    String?
+  status     String   @default("baru")
+  dibuatPada DateTime @default(now())
+
+  @@index([status])
+  @@map("reports")
+}
+
 /// ===================== Tender Enums =====================
 enum Sector {
   OIL_GAS
@@ -327,6 +339,13 @@ enum Contract {
   SUPPLY
   CONSULTING
   MAINTENANCE
+  PSC
+  SERVICE
+  JOC
+  TURNKEY
+  LOGISTICS
+  DRILLING
+  O_M         @map("O&M")
 }
 
 /// ===================== Enums lainnya =====================
@@ -367,18 +386,4 @@ enum OnboardingStep {
   DONE
 
   @@map("onboarding_step")
-}
-
-/// ===================== Reports =====================
-model Report {
-  id          String   @id @default(uuid())
-  judul       String
-  perusahaan  String
-  alasan      String
-  catatan     String?
-  status      String   @default("baru")
-  dibuatPada  DateTime @default(now())
-
-  @@index([status])
-  @@map("reports")
 }

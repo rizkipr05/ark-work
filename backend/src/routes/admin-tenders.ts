@@ -27,7 +27,7 @@ function toDocs(v: unknown): string[] {
 /* -----------------------------------------------------------
  * Create tender (ADMIN ONLY)
  * POST /admin/tenders
- * body: { title, buyer, sector, location, status, contract, budgetUSD, teamSlots, description, documents, deadline }
+ * body: { title, buyer, sector, location, status, contract, budgetUSD, description, documents, deadline }
  * ---------------------------------------------------------*/
 router.post('/', adminRequired, async (req: Request, res: Response) => {
   try {
@@ -39,12 +39,12 @@ router.post('/', adminRequired, async (req: Request, res: Response) => {
       status,     // enum Status
       contract,   // enum Contract
       budgetUSD,
-      teamSlots,
       description,
       documents,
       deadline,
     } = req.body ?? {};
 
+    // basic required checks sesuai schema
     if (!title || !buyer || !sector || !status || !contract) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
@@ -53,15 +53,15 @@ router.post('/', adminRequired, async (req: Request, res: Response) => {
       data: {
         title: String(title),
         buyer: String(buyer),
-        sector,                // Prisma akan validasi enum
+        sector,                // Prisma enum akan divalidasi
         location: String(location ?? ''),
         status,                // enum
         contract,              // enum
         budgetUSD: toInt(budgetUSD, 0),
-        teamSlots: toInt(teamSlots, 0),
-        description: String(description ?? ''),
-        documents: toDocs(documents),
-        deadline: deadline ? new Date(deadline) : new Date(), // boleh pilih default
+        // description & documents punya default di schema, tapi tetap boleh dikirim
+        description: description !== undefined ? String(description ?? '') : undefined,
+        documents: documents !== undefined ? toDocs(documents) : undefined,
+        deadline: deadline ? new Date(deadline) : new Date(), // default deadline = now jika tak dikirim
       },
     });
 
@@ -74,11 +74,13 @@ router.post('/', adminRequired, async (req: Request, res: Response) => {
 
 /* -----------------------------------------------------------
  * List + filter (ADMIN ONLY)
- * GET /admin/tenders?q=&sector=&status=&contract=&loc=&sort=asc|desc
+ * GET /admin/tenders?q=&sector=&status=&contract=&loc=&sort=asc|desc&limit=&offset=
  * ---------------------------------------------------------*/
 router.get('/', adminRequired, async (req: Request, res: Response) => {
   try {
     const { q, sector, status, contract, loc, sort } = req.query as Record<string, string | undefined>;
+    const limit = toInt(req.query.limit, 100);
+    const offset = toInt(req.query.offset, 0);
 
     const where: Prisma.TenderWhereInput = {
       AND: [
@@ -103,12 +105,17 @@ router.get('/', adminRequired, async (req: Request, res: Response) => {
       deadline: (sort === 'desc' ? 'desc' : 'asc') as Prisma.SortOrder,
     };
 
-    const list = await prisma.tender.findMany({
-      where,
-      orderBy,
-    });
+    const [items, total] = await Promise.all([
+      prisma.tender.findMany({
+        where,
+        orderBy,
+        take: Math.max(1, Math.min(1000, limit)),
+        skip: Math.max(0, offset),
+      }),
+      prisma.tender.count({ where }),
+    ]);
 
-    return res.json(list);
+    return res.json({ items, total, limit, offset });
   } catch (err: any) {
     console.error('List tenders error:', err);
     return res.status(500).json({ message: err?.message ?? 'Internal error' });
@@ -150,7 +157,6 @@ router.patch('/:id', adminRequired, async (req: Request, res: Response) => {
       status,
       contract,
       budgetUSD,
-      teamSlots,
       description,
       documents,
       deadline,
@@ -166,8 +172,7 @@ router.patch('/:id', adminRequired, async (req: Request, res: Response) => {
         ...(status !== undefined ? { status } : {}),
         ...(contract !== undefined ? { contract } : {}),
         ...(budgetUSD !== undefined ? { budgetUSD: toInt(budgetUSD, 0) } : {}),
-        ...(teamSlots !== undefined ? { teamSlots: toInt(teamSlots, 0) } : {}),
-        ...(description !== undefined ? { description: String(description) } : {}),
+        ...(description !== undefined ? { description: String(description ?? '') } : {}),
         ...(documents !== undefined ? { documents: toDocs(documents) } : {}),
         ...(deadline !== undefined ? { deadline: new Date(deadline) } : {}),
       },

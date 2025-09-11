@@ -1,12 +1,18 @@
 // frontend/src/lib/api.ts
 
 /* ====================== Base URL ====================== */
+/**
+ * Gunakan salah satu env berikut (urutan prioritas):
+ * - NEXT_PUBLIC_API_URL        -> contoh: "http://localhost:4000"
+ * - NEXT_PUBLIC_API_BASE       -> contoh: "https://backend.example.com"
+ * Fallback: "http://localhost:4000"
+ */
 const RAW_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE ||
   'http://localhost:4000';
 
-// hapus trailing slash supaya join URL konsisten
+/** Bersihkan trailing slash supaya join URL konsisten */
 export const API_BASE = RAW_BASE.replace(/\/+$/, '');
 
 /* ====================== Types ====================== */
@@ -21,7 +27,18 @@ type ApiOpts = RequestInit & {
 function buildUrl(path: string) {
   if (!path) return API_BASE;
   if (/^https?:\/\//i.test(path)) return path; // sudah absolut
+  // pastikan ada 1 slash di antara BASE dan path
   return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+function withQs(base: string, params?: Record<string, any>) {
+  if (!params) return base;
+  const u = new URL(base);
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue;
+    u.searchParams.set(k, String(v));
+  }
+  return u.toString();
 }
 
 /* ====================== Error helpers ====================== */
@@ -39,11 +56,17 @@ async function readErrorMessage(res: Response) {
   }
 }
 
+/* ====================== Public helper: join root + path ====================== */
+/**
+ * Dipakai kalau kamu mau bikin URL absolut ke backend dengan aman.
+ * Contoh:
+ *   fetch(API('/api/tenders'))
+ */
 export const API = (path: string) => {
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
-  return `${base}${path}`;
+  const root = (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000')
+    .replace(/\/+$/, '');
+  return `${root}${path.startsWith('/') ? '' : '/'}${path}`;
 };
-
 
 /* ====================== Main fetch wrapper ====================== */
 /**
@@ -113,6 +136,32 @@ export async function apiForm<T = any>(
     return null;
   }
   return (await res.json()) as T;
+}
+
+/* ================== Rates helper (FIX kurs) ================== */
+/**
+ * Selalu tembak ke backend yang benar (API_BASE), bukan path relatif Next.js.
+ * Backend endpoint: GET /api/rates?base=USD&symbols=IDR
+ */
+export async function getRateUSDToIDR(): Promise<number> {
+  const url = withQs(`${API_BASE}/api/rates`, { base: 'USD', symbols: 'IDR' });
+  const res = await fetch(url, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) throw new Error(`[${res.status}] ${await readErrorMessage(res)}`);
+  const j: any = await res.json().catch(() => ({}));
+  const rate = Number(j?.rate);
+  if (!Number.isFinite(rate)) throw new Error('Invalid rate');
+  return rate;
+}
+
+/** Generalized rate helper: base → symbol */
+export async function getRate(base: string, symbol: string): Promise<number> {
+  const url = withQs(`${API_BASE}/api/rates`, { base, symbols: symbol });
+  const res = await fetch(url, { cache: 'no-store', credentials: 'include' });
+  if (!res.ok) throw new Error(`[${res.status}] ${await readErrorMessage(res)}`);
+  const j: any = await res.json().catch(() => ({}));
+  const rate = Number(j?.rate);
+  if (!Number.isFinite(rate)) throw new Error('Invalid rate');
+  return rate;
 }
 
 /* ================== Energy News (Google News RSS → rss2json) ================= */

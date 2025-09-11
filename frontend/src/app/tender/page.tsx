@@ -15,7 +15,8 @@ const fmtUSD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'US
 const fmtIDR = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
 
 async function getRateUSDToIDR(): Promise<number> {
-  const r = await fetch('/api/rates?base=USD&symbols=IDR', { cache: 'no-store' });
+  const base = API.replace(/\/+$/, '');
+  const r = await fetch(`${base}/api/rates?base=USD&symbols=IDR`, { cache: 'no-store', credentials: 'include' });
   if (!r.ok) throw new Error('Rate API error');
   const j = await r.json();
   const rate = Number(j?.rate);
@@ -32,7 +33,7 @@ type TenderDTO = {
   location: string;
   status: 'OPEN' | 'PREQUALIFICATION' | 'CLOSED';
   contract: 'EPC' | 'SUPPLY' | 'CONSULTING' | 'MAINTENANCE';
-  budgetUSD: number;               // nilai disimpan di USD di DB
+  budgetUSD: number;               // ⬅️ di DB; ISINYA IDR
   deadline: string;                // ISO
   description: string;
   documents?: string[] | null;
@@ -52,7 +53,7 @@ type Tender = {
   sector: SectorUI;
   status: StatusUI;
   contract: ContractUI;
-  budgetUSD: number;         // selalu sumber kebenaran
+  budgetUSD: number;         // ⬅️ treat as IDR
   deadline: string;          // YYYY-MM-DD
   description: string;
   documents: string[];
@@ -104,7 +105,7 @@ function normalizeServer(list: TenderDTO[]): Tender[] {
     sector: adaptSector(r.sector),
     status: adaptStatus(r.status),
     contract: adaptContract(r.contract),
-    budgetUSD: Number(r.budgetUSD || 0),
+    budgetUSD: Number(r.budgetUSD || 0), // ⬅️ isinya IDR
     deadline: toYmd(r.deadline),
     description: r.description || '',
     documents: Array.isArray(r.documents) ? r.documents : [],
@@ -225,10 +226,14 @@ export default function TendersLikeJobsPage() {
     }
   };
 
-  const fmtMoney = (usd: number) => {
-    if (displayCurrency === 'USD') return fmtUSD.format(usd);
-    const rate = rateUSDtoIDR ?? 15000; // fallback 15k sementara
-    return fmtIDR.format(Math.round(usd * rate));
+  // ⬇️ Treat nilai dari server sebagai **IDR**
+  const fmtMoney = (serverBudgetField: number) => {
+    const idr = Math.max(0, Number(serverBudgetField || 0));
+    if (displayCurrency === 'USD') {
+      const rate = rateUSDtoIDR ?? 15000;
+      return fmtUSD.format(Math.round(idr / rate));
+    }
+    return fmtIDR.format(idr);
   };
 
   const toggleSave = (id: number | string) => {
@@ -317,8 +322,8 @@ export default function TendersLikeJobsPage() {
                   {rateErr
                     ? 'Rate unavailable'
                     : displayCurrency === 'IDR'
-                      ? `Showing in IDR • 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
-                      : 'Showing in USD'}
+                      ? `Kurs aktif: 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
+                      : 'Tampilan USD'}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -455,8 +460,8 @@ export default function TendersLikeJobsPage() {
                   {rateErr
                     ? 'Rate unavailable'
                     : displayCurrency === 'IDR'
-                      ? `Showing in IDR • 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
-                      : 'Showing in USD'}
+                      ? `Kurs aktif: 1 USD ≈ ${rateUSDtoIDR ? fmtIDR.format(rateUSDtoIDR) : '…'}`
+                      : 'Tampilan USD'}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -522,7 +527,7 @@ export default function TendersLikeJobsPage() {
           onClose={() => setDetailOpen(false)}
           onParticipate={() => participateSelected(detailTender)}
           postedText={fmtDate(detailTender.created)}
-          money={(usd) => fmtMoney(usd)}
+          money={(n) => fmtMoney(n)}
           dateFmt={(ymd) => fmtDate(ymd)}
         />
       )}
@@ -598,6 +603,7 @@ function FilterSelect({
     </label>
   );
 }
+
 function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1">
@@ -610,18 +616,18 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
 /* --------- Detail Modal --------- */
 function DetailModal({
   tender,
-  postedText,
   onClose,
   onParticipate,
   money,
   dateFmt,
+  postedText,
 }: {
   tender: Tender;
-  postedText: string;
   onClose: () => void;
   onParticipate: () => void;
-  money: (usd: number) => string;
+  money: (n: number) => string;
   dateFmt: (ymd: string) => string;
+  postedText: string;
 }) {
   return (
     <div className="fixed inset-0 z-[100]">
@@ -880,3 +886,4 @@ function AvatarLogo({ name, size = 64 }: { name?: string; size?: number }) {
     </div>
   );
 }
+  

@@ -20,7 +20,7 @@ import tendersRouter from './routes/tenders';
 import adminTendersRouter from './routes/admin-tenders';
 import { jobsRouter } from './routes/jobs';
 import reportsRouter from './routes/reports';
-import ratesRouter from './routes/rates';            // ✅ tambahkan
+import ratesRouter from './routes/rates'; // ✅ kurs API
 
 /* --------------------------- Role guards (opt) --------------------------- */
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -30,9 +30,9 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const DEFAULT_PORT = Number(process.env.PORT || 4000);
 
 /* =========================================================================
-   C O R S   (local dev friendly + production safe)
+   C O R S
    FRONTEND_ORIGIN bisa multi (comma separated), contoh:
-   FRONTEND_ORIGIN="http://localhost:3000,http://127.0.0.1:5173,https://arkwork.vercel.app"
+   FRONTEND_ORIGIN="http://localhost:3000,http://127.0.0.1:5173,https://*.vercel.app"
    ======================================================================= */
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
 
@@ -90,13 +90,48 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 
-// log sederhana
+/* ------------------ Middleware: BigInt -> string for res.json ------------ */
+/**
+ * Patch res.json supaya semua nilai BigInt dikonversi ke string
+ * sebelum dikirim ke client. Mencegah error:
+ * "Do not know how to serialize a BigInt"
+ *
+ * TARUH SEBELUM REGISTRASI ROUTE.
+ */
+app.use((_req, res, next) => {
+  function convertBigInt(obj: any): any {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'bigint') return obj.toString();
+    if (Array.isArray(obj)) return obj.map(convertBigInt);
+    if (typeof obj === 'object') {
+      const out: any = {};
+      for (const k of Object.keys(obj)) out[k] = convertBigInt(obj[k]);
+      return out;
+    }
+    return obj;
+  }
+
+  // bind ke res supaya tidak pakai `this`
+  const oldJson = res.json.bind(res);
+
+  const patched: typeof res.json = (body?: any) => {
+    try {
+      return oldJson(convertBigInt(body));
+    } catch {
+      return oldJson(body as any);
+    }
+  };
+
+  res.json = patched;
+  next();
+});
+
+/* ------------------------------- log + static --------------------------- */
 app.use((req: Request, _res: Response, next: NextFunction) => {
   console.log(`${req.method} ${req.originalUrl}`);
   next();
 });
 
-// static files
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
 /* ------------------------------ Health ---------------------------------- */
@@ -161,6 +196,11 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled error:', err);
   if (err instanceof Error && err.message.startsWith('Not allowed by CORS')) {
     return res.status(403).json({ error: 'CORS: Origin not allowed' });
+  }
+  if (NODE_ENV !== 'production') {
+    return res
+      .status(500)
+      .json({ error: err?.message || 'Internal server error', stack: err?.stack });
   }
   res.status(500).json({ error: 'Internal server error' });
 });

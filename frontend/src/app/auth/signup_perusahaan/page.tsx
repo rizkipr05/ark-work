@@ -26,7 +26,7 @@ const MIDTRANS_PRODUCTION =
 
 /* --------------------------------- Types --------------------------------- */
 type Mode = 'signin' | 'signup';
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 type Plan = {
   id: string;
@@ -54,19 +54,6 @@ type CompanyProfile = {
   socials: Partial<
     Record<'website' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'youtube', string>
   >;
-};
-
-type NewJob = {
-  title: string;
-  functionArea: string;
-  level: string;
-  type: 'full_time' | 'part_time' | 'contract' | 'internship';
-  workMode: 'onsite' | 'remote' | 'hybrid';
-  location: string;
-  deadline?: string;
-  description: string;
-  requirements: string;
-  tags: string;
 };
 
 type SignupCompanyPayload = {
@@ -209,7 +196,7 @@ function savePaymentRecord(rec: PaymentRecord) {
 export default function Page() {
   const t = useTranslations('companySignup');
   const router = useRouter();
-  const { signinEmployer } = useAuth(); // dipakai untuk auto-login Step 5
+  const { signinEmployer } = useAuth(); // dipakai untuk auto-login Step akhir
 
   const [mode, setMode] = useState<Mode>('signin');
   const [error, setError] = useState<string | null>(null);
@@ -227,14 +214,7 @@ export default function Page() {
     try {
       setSiBusy(true);
       setError(null);
-
-      // Jika useAuth.signinEmployer mengembalikan data employer, ambil employerId di sana.
-      // Misal: const { employerId } = await signinEmployer(siEmail.trim(), siPw);
       await signinEmployer(siEmail.trim(), siPw);
-
-      // OPTIONAL: kalau signinEmployer mengembalikan employerId:
-      // localStorage.setItem('ark_employer_id', employerId);
-
       router.replace('/employer');
       router.refresh();
     } catch (err: any) {
@@ -244,7 +224,7 @@ export default function Page() {
     }
   }
 
-  /* ------------- SIGNUP (wizard 5 step) ------------- */
+  /* ------------- SIGNUP (wizard) ------------- */
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
   const [employerId, setEmployerId] = useState<string | null>(null);
@@ -304,7 +284,6 @@ export default function Page() {
         }
       );
 
-      // ✅ Simpan employerId ke state & localStorage
       setEmployerId(resp.employerId);
       localStorage.setItem('ark_employer_id', resp.employerId);
 
@@ -539,53 +518,7 @@ export default function Page() {
     }
   }
 
-  /* ----------------------------- Step 4: Job form ---------------------------- */
-  const [job, setJob] = useState<NewJob>({
-    title: '',
-    functionArea: '',
-    level: '',
-    type: 'full_time',
-    workMode: 'onsite',
-    location: '',
-    deadline: '',
-    description: '',
-    requirements: '',
-    tags: '',
-  });
-
-  function validateStep4() {
-    if (job.title.trim().length < 3) return 'Posisi pekerjaan wajib diisi.';
-    if (job.location.trim().length < 2) return 'Lokasi wajib diisi.';
-    if (job.description.trim().length < 10) return 'Deskripsi terlalu singkat.';
-    return null;
-  }
-
-  async function submitStep4() {
-    const emsg = validateStep4();
-    if (emsg) throw new Error(emsg);
-    if (!employerId) throw new Error('EmployerId belum tersedia.');
-
-    const extra = [
-      job.functionArea && `Bidang: ${job.functionArea}`,
-      job.level && `Level: ${job.level}`,
-      job.workMode && `Mode: ${job.workMode}`,
-      job.deadline && `Batas Lamar: ${job.deadline}`,
-      job.requirements && `\n\nKualifikasi:\n${job.requirements}`,
-      job.tags && `\n\nTags: ${job.tags}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    await apiPost<{ ok: true; jobId: string }>('/api/employers/step4', {
-      employerId,
-      title: job.title.trim(),
-      description: `${job.description}${extra ? `\n\n${extra}` : ''}`,
-      location: job.location,
-      employment: job.type.replace('_', '-'),
-    });
-  }
-
-  /* -------------------------------- Submit step 5 ------------------------------- */
+  /* -------------------------------- Submit final ------------------------------- */
   async function onFinish(e: MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
     if (busy) return;
@@ -597,7 +530,6 @@ export default function Page() {
       if (!employerId) throw new Error('EmployerId belum tersedia.');
       if (step <= 2) await submitStep2();
       if (!paid) throw new Error('Selesaikan pembayaran terlebih dahulu.');
-      if (step <= 4) await submitStep4();
 
       await apiPost('/api/employers/step5', {
         employerId,
@@ -605,14 +537,12 @@ export default function Page() {
         files: [],
       });
 
-      // ====== LOGIN OTOMATIS (OPSI 5) ======
+      // ====== LOGIN OTOMATIS ======
       const loginEmail = (profile.email || email).trim();
       if (!loginEmail) throw new Error('Email tidak tersedia untuk login otomatis.');
 
-      // Jika signinEmployer mengembalikan employerId, kamu bisa set localStorage di sana.
       await signinEmployer(loginEmail, pw);
 
-      // Pastikan localStorage employer id tetap ada
       if (employerId) localStorage.setItem('ark_employer_id', employerId);
 
       router.replace('/employer');
@@ -630,8 +560,7 @@ export default function Page() {
     { n: 1, label: 'Buat Akun' },
     { n: 2, label: 'Profil' },
     { n: 3, label: 'Pilih Paket' },
-    { n: 4, label: 'Pasang Lowongan' },
-    { n: 5, label: 'Verifikasi' },
+    { n: 4, label: 'Verifikasi' },
   ];
 
   /* --------------------------------- Render --------------------------------- */
@@ -783,7 +712,7 @@ export default function Page() {
                     >
                       {label}
                     </div>
-                    {n !== 5 && <div className="mx-2 sm:mx-4 h-[2px] flex-1 rounded bg-slate-200" />}
+                    {n !== steps[steps.length - 1].n && <div className="mx-2 sm:mx-4 h-[2px] flex-1 rounded bg-slate-200" />}
                   </div>
                 ))}
               </div>
@@ -1201,6 +1130,7 @@ export default function Page() {
                           setBusy(true);
                           setError(null);
                           await submitStep3();
+                          // langsung ke verifikasi setelah pembayaran
                           setStep(4);
                         } catch (e: any) {
                           setError(e?.message || 'Gagal memulai pembayaran.');
@@ -1217,182 +1147,8 @@ export default function Page() {
                 </div>
               )}
 
-              {/* ------------------------------- STEP 4 ------------------------------- */}
+              {/* ------------------------------- STEP 4 (VERIFIKASI) ------------------------------- */}
               {step === 4 && (
-                <div className="grid gap-5">
-                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                    <div>
-                      <h2 className="text-xl font-semibold text-slate-900">Pasang Lowongan</h2>
-                      <p className="mt-1 text-sm text-slate-600">Jelaskan posisi, bidang, dan kualifikasi agar kandidat tepat.</p>
-                    </div>
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                      <div className="font-semibold">Tips</div>
-                      <ul className="mt-1 list-disc pl-4">
-                        <li>Gunakan judul spesifik</li>
-                        <li>Jelaskan tanggung jawab & benefit</li>
-                        <li>Tuliskan kualifikasi yang jelas</li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Posisi Pekerjaan</span>
-                    <input
-                      value={job.title}
-                      onChange={(e) => setJob((j) => ({ ...j, title: e.target.value }))}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="Masukan posisi pekerjaan"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Bidang Pekerjaan</span>
-                    <select
-                      value={job.functionArea}
-                      onChange={(e) => setJob((j) => ({ ...j, functionArea: e.target.value }))}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                    >
-                      <option value="">Pilih bidang pekerjaan</option>
-                      <option>Engineering</option>
-                      <option>Product</option>
-                      <option>Design</option>
-                      <option>Marketing</option>
-                      <option>Finance</option>
-                      <option>HR</option>
-                    </select>
-                  </label>
-
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">Level</span>
-                      <select
-                        value={job.level}
-                        onChange={(e) => setJob((j) => ({ ...j, level: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      >
-                        <option value="">Pilih level</option>
-                        <option>Intern</option>
-                        <option>Junior</option>
-                        <option>Mid</option>
-                        <option>Senior</option>
-                        <option>Manager</option>
-                      </select>
-                    </label>
-
-                    <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">Tipe Kerja</span>
-                      <select
-                        value={job.type}
-                        onChange={(e) => setJob((j) => ({ ...j, type: e.target.value as NewJob['type'] }))}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      >
-                        <option value="full_time">Full-time</option>
-                        <option value="part_time">Part-time</option>
-                        <option value="contract">Contract</option>
-                        <option value="internship">Internship</option>
-                      </select>
-                    </label>
-
-                    <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">Mode Kerja</span>
-                      <select
-                        value={job.workMode}
-                        onChange={(e) => setJob((j) => ({ ...j, workMode: e.target.value as NewJob['workMode'] }))}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      >
-                        <option value="onsite">On-site</option>
-                        <option value="remote">Remote</option>
-                        <option value="hybrid">Hybrid</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">Lokasi</span>
-                      <input
-                        value={job.location}
-                        onChange={(e) => setJob((j) => ({ ...j, location: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                        placeholder="Jakarta / Surabaya / Remote"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-sm text-slate-600">Batas Lamar (opsional)</span>
-                      <input
-                        type="date"
-                        value={job.deadline}
-                        onChange={(e) => setJob((j) => ({ ...j, deadline: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      />
-                    </label>
-                  </div>
-
-                  <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Deskripsi</span>
-                    <textarea
-                      value={job.description}
-                      onChange={(e) => setJob((j) => ({ ...j, description: e.target.value }))}
-                      rows={5}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="Gambarkan tanggung jawab, budaya tim, benefit, dll."
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Kualifikasi</span>
-                    <textarea
-                      value={job.requirements}
-                      onChange={(e) => setJob((j) => ({ ...j, requirements: e.target.value }))}
-                      rows={4}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="Contoh: 3+ tahun pengalaman React, terbiasa Next.js, dsb."
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1 block text-sm text-slate-600">Tags (pisahkan koma)</span>
-                    <input
-                      value={job.tags}
-                      onChange={(e) => setJob((j) => ({ ...j, tags: e.target.value }))}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      placeholder="react, nextjs, tailwind"
-                    />
-                  </label>
-
-                  <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                    <button
-                      type="button"
-                      onClick={() => setStep(3)}
-                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
-                    >
-                      Kembali
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          setBusy(true);
-                          setError(null);
-                          await submitStep4();
-                          setStep(5);
-                        } catch (e: any) {
-                          setError(e?.message || 'Gagal menyimpan lowongan.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                      disabled={busy}
-                    >
-                      {busy ? 'Menyimpan…' : 'Selanjutnya'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------- STEP 5 ------------------------------- */}
-              {step === 5 && (
                 <div className="grid gap-6">
                   <h2 className="text-xl font-semibold text-slate-900">Verifikasi & Ringkasan</h2>
                   <div className="grid gap-6 md:grid-cols-2">
@@ -1426,32 +1182,17 @@ export default function Page() {
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
-                      <div className="mb-3 text-sm font-semibold text-slate-900">Lowongan</div>
-                      <dl className="grid gap-4 text-sm md:grid-cols-2">
-                        <Row label="Posisi">{job.title || '-'}</Row>
-                        <Row label="Bidang">{job.functionArea || '-'}</Row>
-                        <Row label="Level">{job.level || '-'}</Row>
-                        <Row label="Tipe">{job.type.replace('_', ' ')}</Row>
-                        <Row label="Mode Kerja">{job.workMode || '-'}</Row>
-                        <Row label="Lokasi">{job.location || '-'}</Row>
-                        <Row label="Batas Lamar">{job.deadline || '-'}</Row>
-                        <Row label="Tags">{job.tags || '-'}</Row>
-                      </dl>
-                      <div className="mt-3">
-                        <div className="mb-1 text-xs font-medium text-slate-500">Deskripsi</div>
-                        <p className="whitespace-pre-wrap text-sm text-slate-700">{job.description || '-'}</p>
-                      </div>
-                      <div className="mt-3">
-                        <div className="mb-1 text-xs font-medium text-slate-500">Kualifikasi</div>
-                        <p className="whitespace-pre-wrap text-sm text-slate-700">{job.requirements || '-'}</p>
-                      </div>
+                      <div className="mb-3 text-sm font-semibold text-slate-900">Catatan</div>
+                      <p className="text-sm text-slate-700">
+                        Setelah verifikasi selesai akun perusahaan akan aktif dan dapat mengelola lowongan. (Bagian pasang lowongan dihapus sesuai permintaan.)
+                      </p>
                     </div>
                   </div>
 
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                     <button
                       type="button"
-                      onClick={() => setStep(4)}
+                      onClick={() => setStep(3)}
                       className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-slate-50"
                     >
                       Kembali

@@ -44,13 +44,18 @@ export default function AdminSidebar() {
     }
   }, [router, signout]);
 
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  // Tambah item "Reports" ke sidebar (path: /admin/reports)
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   const menu = useMemo(() => ([
     { name: 'Dashboard', path: '/admin', icon: HomeIcon },
+    { name: 'Reports', path: '/admin/reports', icon: FlagIcon },
     { name: 'Tenders Management', path: '/admin/tenders', icon: LayersIcon },
     { name: 'User Management', path: '/admin/users', icon: UsersIcon },
     { name: 'Monetisasi (Plans)', path: '/admin/monet', icon: MoneyIcon },
     { name: 'Payments (Midtrans)', path: '/admin/payments', icon: CreditCardIcon },
   ]), []);
+  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   const isActive = (path: string) =>
     path === '/admin' ? currentPath === path : currentPath === path || currentPath.startsWith(path + '/');
@@ -293,12 +298,6 @@ function SparkIcon(props: React.SVGProps<SVGSVGElement>) {
 function HomeIcon(props: React.SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>;
 }
-function LayoutIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M3 10h18M10 20V10" stroke="currentColor" strokeWidth="2"/></svg>;
-}
-function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/></svg>;
-}
 function LayersIcon(props: React.SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 3l8 4-8 4-8-4 8-4Z" stroke="currentColor" strokeWidth="2"/><path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2"/><path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2"/></svg>;
 }
@@ -327,6 +326,14 @@ function CreditCardIcon(props: React.SVGProps<SVGSVGElement>) {
       <rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="2"/>
       <path d="M2 10h20" stroke="currentColor" strokeWidth="2"/>
       <rect x="6" y="14" width="6" height="2" rx="1" stroke="currentColor" strokeWidth="2"/>
+    </svg>
+  );
+}
+// Ikon baru untuk menu Reports
+function FlagIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M5 21V5m0 0h9l-1.5 3H19l-1.5 3H14l-1.5 3H5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }

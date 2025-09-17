@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { API } from "@/lib/api";
 import ReportDialog from "@/app/admin/reports/ReportDialog";
-
+  
 /* ---------------- Server base ---------------- */
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ||

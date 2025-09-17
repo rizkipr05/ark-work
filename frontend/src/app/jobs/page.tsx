@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-// import { API } from "@/lib/api"; // tidak digunakan di file ini
+import dynamic from "next/dynamic";
 import ReportDialog from "@/app/admin/reports/ReportDialog";
 
 /* ---------------- Server base ---------------- */
@@ -256,6 +256,11 @@ export default function JobsPage() {
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailJob, setDetailJob] = useState<Job | null>(null);
+
+  // ⬆️ menjadi dynamic supaya Next TIDAK mencoba treat sebagai RSC dari route lain
+  const ReportDialog = dynamic(() => import("@/app/admin/reports/ReportDialog"), {
+    ssr: false,
+  });
 
   // Report dialog state (pakai ReportDialog eksternal)
   const [reportOpen, setReportOpen] = useState(false);

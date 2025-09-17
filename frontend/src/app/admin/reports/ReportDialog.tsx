@@ -1,7 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { API } from "@/lib/api";
+
+// Base URL backend (fallback ke 4000)
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:4000";
 
 export type ReportDialogProps = {
   open: boolean;
@@ -27,8 +32,10 @@ export default function ReportDialog({
   const [catatan, setCatatan] = useState(defaultData?.catatan || "");
   const [loading, setLoading] = useState(false);
 
+  // 👇 Biar kelihatan kalau file ini benar2 ter-load
   useEffect(() => {
     if (open) {
+      console.log("[ReportDialog] OPEN with defaults:", defaultData);
       setJudul(defaultData?.judul || "");
       setPerusahaan(defaultData?.perusahaan || "");
       setAlasan(defaultData?.alasan || "Spam / Penipuan");
@@ -40,8 +47,10 @@ export default function ReportDialog({
     e.preventDefault();
     setLoading(true);
     try {
-      // ⛳️ KUNCI PERBAIKAN: gunakan /api/reports
-      const res = await fetch(API("/api/reports"), {
+      const url = `${API_BASE.replace(/\/+$/, "")}/api/reports`;
+      console.log("[ReportDialog] POST", url, { judul, perusahaan, alasan, catatan });
+
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -50,13 +59,15 @@ export default function ReportDialog({
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(text || "Gagal mengirim laporan");
+        throw new Error(`HTTP ${res.status} @ ${url}\n${text}`);
       }
 
-      const created = await res.json();
-      onSubmitted?.(created);
+      const data = await res.json();
+      console.log("[ReportDialog] OK:", data);
+      onSubmitted?.(data);
       onClose();
     } catch (err: any) {
+      console.error("[ReportDialog] FAIL:", err);
       alert(err?.message || "Terjadi kesalahan");
     } finally {
       setLoading(false);
@@ -70,41 +81,19 @@ export default function ReportDialog({
       <div className="w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h2 className="text-lg font-semibold">Laporkan Lowongan</h2>
-          <button
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100"
-            aria-label="Tutup"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100" aria-label="Tutup">✕</button>
         </div>
 
         <form onSubmit={submit} className="mt-4 space-y-4">
           <div className="grid gap-2 rounded-xl border p-3">
             <div className="text-sm text-gray-500">RINGKASAN LOWONGAN</div>
-            <input
-              required
-              value={judul}
-              onChange={(e) => setJudul(e.target.value)}
-              placeholder="Judul lowongan"
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            />
-            <input
-              required
-              value={perusahaan}
-              onChange={(e) => setPerusahaan(e.target.value)}
-              placeholder="Nama perusahaan"
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            />
+            <input required value={judul} onChange={(e) => setJudul(e.target.value)} placeholder="Judul lowongan" className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring" />
+            <input required value={perusahaan} onChange={(e) => setPerusahaan(e.target.value)} placeholder="Nama perusahaan" className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring" />
           </div>
 
           <div className="grid gap-2">
             <label className="text-sm font-medium">Alasan</label>
-            <select
-              value={alasan}
-              onChange={(e) => setAlasan(e.target.value)}
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            >
+            <select value={alasan} onChange={(e) => setAlasan(e.target.value)} className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring">
               <option>Spam / Penipuan</option>
               <option>Konten Tidak Pantas</option>
               <option>Informasi Palsu</option>
@@ -115,24 +104,12 @@ export default function ReportDialog({
 
           <div className="grid gap-2">
             <label className="text-sm font-medium">Catatan (opsional)</label>
-            <textarea
-              value={catatan}
-              onChange={(e) => setCatatan(e.target.value)}
-              rows={4}
-              className="w-full resize-y rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-              placeholder="Tambahkan detail…"
-            />
+            <textarea value={catatan} onChange={(e) => setCatatan(e.target.value)} rows={4} className="w-full resize-y rounded-xl border px-3 py-2 focus:outline-none focus:ring" placeholder="Tambahkan detail…" />
           </div>
 
           <div className="mt-2 flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2 hover:bg-gray-50">
-              Batal
-            </button>
-            <button
-              disabled={loading}
-              type="submit"
-              className="rounded-xl bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-60"
-            >
+            <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2 hover:bg-gray-50">Batal</button>
+            <button disabled={loading} type="submit" className="rounded-xl bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-60">
               {loading ? "Mengirim..." : "Kirim Laporan"}
             </button>
           </div>

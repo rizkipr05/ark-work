@@ -154,6 +154,9 @@ app.use('/api/payments', paymentsRouter);
 // Jobs API
 app.use('/api', jobsRouter);
 
+app.use('/api/reports', reportsRouter);
+
+
 /* ------------------------- Protected examples ---------------------------- */
 app.get('/api/profile', authRequired, (req, res) => {
   res.json({ ok: true, whoami: (req as any).auth });

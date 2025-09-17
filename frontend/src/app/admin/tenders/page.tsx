@@ -7,11 +7,22 @@ import { getRateUSDToIDR } from '@/lib/api';
 /* ===== Enum sesuai Prisma ===== */
 type Sector = 'OIL_GAS' | 'RENEWABLE_ENERGY' | 'UTILITIES' | 'ENGINEERING';
 type Status = 'OPEN' | 'PREQUALIFICATION' | 'CLOSED';
-type Contract = 'EPC' | 'SUPPLY' | 'CONSULTING' | 'MAINTENANCE';
+type Contract =
+  | 'EPC'
+  | 'SUPPLY'
+  | 'CONSULTING'
+  | 'MAINTENANCE'
+  | 'PSC'
+  | 'SERVICE'
+  | 'JOC'
+  | 'TURNKEY'
+  | 'LOGISTICS'
+  | 'DRILLING'
+  | 'O_M';
 
-/* ===== Wilayah dari Emsifa ===== */
+/* ===== Wilayah Emsifa ===== */
 type Province = { id: string; name: string };
-type Regency  = { id: string; name: string };
+type Regency = { id: string; name: string };
 
 type FormState = {
   title: string;
@@ -19,10 +30,10 @@ type FormState = {
   sector: Sector;
   status: Status;
   contract: Contract;
-  provinceId: string;     // id provinsi (wajib)
-  regencyId: string;      // id kab/kota (wajib)
-  budgetIDR: string;      // disimpan sebagai string biar bisa “1.000.000”
-  deadline: string;       // yyyy-mm-dd
+  provinceId: string;
+  regencyId: string;
+  budgetIDR: string;
+  deadline: string; // yyyy-mm-dd
   description: string;
   documentsCsv: string;
 };
@@ -34,21 +45,24 @@ type Tender = {
   sector: Sector;
   status: Status;
   contract: Contract;
-  budgetUSD: number;      // ⬅️ kolom DB; kita isi angka IDR apa adanya
-  deadline: string;
+  budgetUSD: number; // disimpan angka IDR apa adanya
+  deadline: string; // ISO
   description: string;
   documents?: string[] | null;
   createdAt?: string | null;
-  location: string;       // gabungan “Kab/Kota, Provinsi”
+  location: string;
 };
 
 const PATH_ADMIN_TENDERS = '/admin/tenders';
 
 /* ----------------- helpers kecil ----------------- */
-const moneyFmtIDR = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
+const moneyFmtIDR = new Intl.NumberFormat('id-ID', {
+  style: 'currency',
+  currency: 'IDR',
+  maximumFractionDigits: 0,
+});
 
 function unformatIDR(input: string): number {
-  // hilangkan semua char non-digit
   const clean = (input || '').replace(/[^\d]/g, '');
   const n = Number(clean);
   return Number.isFinite(n) ? n : 0;
@@ -61,7 +75,15 @@ function fmtDate(iso?: string) {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const yy = d.getFullYear();
     return `${dd}/${mm}/${yy}`;
-  } catch { return iso || '-'; }
+  } catch {
+    return iso || '-';
+  }
+}
+function ymdToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
 }
 
 /* ------------------- hooks wilayah ------------------- */
@@ -96,7 +118,9 @@ function useProvinces() {
         if (!gone) setLoading(false);
       }
     })();
-    return () => { gone = true; };
+    return () => {
+      gone = true;
+    };
   }, []);
 
   return { data, loading, error };
@@ -124,7 +148,9 @@ function useRegencies(provinceId?: string) {
           if (!gone) setData(parsed);
           return;
         }
-        const r = await fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${provinceId}.json`);
+        const r = await fetch(
+          `https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${provinceId}.json`,
+        );
         if (!r.ok) throw new Error('Gagal memuat kabupaten/kota');
         const regencies: Regency[] = await r.json();
         if (!gone) {
@@ -137,7 +163,9 @@ function useRegencies(provinceId?: string) {
         if (!gone) setLoading(false);
       }
     })();
-    return () => { gone = true; };
+    return () => {
+      gone = true;
+    };
   }, [provinceId]);
 
   return { data, loading, error };
@@ -145,7 +173,7 @@ function useRegencies(provinceId?: string) {
 
 /* ================== PAGE ================== */
 export default function AdminTendersPage() {
-  /* --- kurs (untuk informasi saja) --- */
+  /* --- kurs (informasi) --- */
   const [rate, setRate] = useState<number | null>(null);
   const [rateErr, setRateErr] = useState<string | null>(null);
 
@@ -160,10 +188,12 @@ export default function AdminTendersPage() {
         if (!stop) setRateErr(e?.message || 'Gagal memuat kurs');
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, []);
 
-  /* --- form --- */
+  /* --- form create --- */
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -176,12 +206,11 @@ export default function AdminTendersPage() {
     provinceId: '',
     regencyId: '',
     budgetIDR: '',
-    deadline: new Date().toISOString().slice(0, 10),
+    deadline: ymdToday(),
     description: '',
     documentsCsv: '',
   });
-  const onChange = <K extends keyof FormState>(k: K, v: FormState[K]) =>
-    setF(s => ({ ...s, [k]: v }));
+  const onChange = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }));
 
   /* --- wilayah --- */
   const { data: provinces } = useProvinces();
@@ -189,13 +218,14 @@ export default function AdminTendersPage() {
 
   useEffect(() => {
     // reset kab/kota ketika ganti provinsi
-    setF(s => ({ ...s, regencyId: '' }));
+    setF((s) => ({ ...s, regencyId: '' }));
   }, [f.provinceId]);
 
-  /* --- list --- */
+  /* --- list & edit --- */
   const [list, setList] = useState<Tender[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listErr, setListErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Tender | null>(null);
 
   async function fetchList() {
     setLoadingList(true);
@@ -204,8 +234,10 @@ export default function AdminTendersPage() {
       const res: any = await api(PATH_ADMIN_TENDERS);
       const rows: any[] = Array.isArray(res)
         ? res
-        : Array.isArray(res?.items) ? res.items
-        : Array.isArray(res?.data) ? res.data
+        : Array.isArray(res?.items)
+        ? res.items
+        : Array.isArray(res?.data)
+        ? res.data
         : [];
       rows.sort((a, b) => +new Date(b?.createdAt || 0) - +new Date(a?.createdAt || 0));
       setList(rows as Tender[]);
@@ -215,9 +247,11 @@ export default function AdminTendersPage() {
       setLoadingList(false);
     }
   }
-  useEffect(() => { fetchList(); }, []);
+  useEffect(() => {
+    fetchList();
+  }, []);
 
-  /* --- submit --- */
+  /* --- submit create --- */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
@@ -231,14 +265,14 @@ export default function AdminTendersPage() {
       return;
     }
 
-    // nama prov/kab utk lokasi
-    const provName = provinces.find(p => p.id === f.provinceId)?.name || '';
-    const regName  = regencies.find(r => r.id === f.regencyId)?.name || '';
+    // lokasi
+    const provName = provinces.find((p) => p.id === f.provinceId)?.name || '';
+    const regName = regencies.find((r) => r.id === f.regencyId)?.name || '';
     const location = [regName, provName].filter(Boolean).join(', ');
 
-    // parse Rupiah → number (disimpan apa adanya sebagai "budgetUSD")
+    // budget: simpan IDR apa adanya ke kolom budgetUSD
     const idr = unformatIDR(f.budgetIDR);
-    const budgetUSD = Math.max(0, Math.round(idr)); // ⬅️ TANPA konversi
+    const budgetUSD = Math.max(0, Math.round(idr));
 
     setSaving(true);
     try {
@@ -249,14 +283,14 @@ export default function AdminTendersPage() {
         location,
         status: f.status,
         contract: f.contract,
-        budgetUSD, // ⬅️ isinya IDR
+        budgetUSD, // isinya IDR
         description: f.description.trim(),
-        documents: f.documentsCsv.split(',').map(s => s.trim()).filter(Boolean),
+        documents: f.documentsCsv.split(',').map((s) => s.trim()).filter(Boolean),
         deadline: new Date(f.deadline + 'T00:00:00').toISOString(),
       };
       await api(PATH_ADMIN_TENDERS, { json: payload });
       alert('Tender created!');
-      setF(s => ({
+      setF((s) => ({
         ...s,
         title: '',
         buyer: '',
@@ -277,11 +311,16 @@ export default function AdminTendersPage() {
     if (!ok) return;
     try {
       await api(`${PATH_ADMIN_TENDERS}/${id}`, { method: 'DELETE', expectJson: false });
-      setList(rows => rows.filter(r => r.id !== id));
+      setList((rows) => rows.filter((r) => r.id !== id));
     } catch (e: any) {
       alert(e?.message || 'Failed to delete tender');
     }
   }
+
+  const contractOptions: Contract[] = useMemo(
+    () => ['EPC', 'SUPPLY', 'CONSULTING', 'MAINTENANCE', 'PSC', 'SERVICE', 'JOC', 'TURNKEY', 'LOGISTICS', 'DRILLING', 'O_M'],
+    [],
+  );
 
   return (
     <div className="space-y-8">
@@ -296,9 +335,11 @@ export default function AdminTendersPage() {
           </div>
           <div className="rounded-xl border border-neutral-200 p-2 text-xs text-neutral-700">
             <div className="font-medium">Kurs aktif</div>
-            {rateErr
-              ? <div className="text-rose-600">Tidak tersedia • tampil IDR apa adanya</div>
-              : <div>{rate ? <>1 USD ≈ {moneyFmtIDR.format(rate)}</> : 'Memuat…'}</div>}
+            {rateErr ? (
+              <div className="text-rose-600">Tidak tersedia • tampil IDR apa adanya</div>
+            ) : (
+              <div>{rate ? <>1 USD ≈ {moneyFmtIDR.format(rate)}</> : 'Memuat…'}</div>
+            )}
           </div>
         </div>
 
@@ -314,7 +355,7 @@ export default function AdminTendersPage() {
             <label className="text-sm font-medium">Title</label>
             <input
               value={f.title}
-              onChange={e => onChange('title', e.target.value)}
+              onChange={(e) => onChange('title', e.target.value)}
               className="rounded-xl border px-3 py-2"
               required
             />
@@ -324,7 +365,7 @@ export default function AdminTendersPage() {
             <label className="text-sm font-medium">Owner</label>
             <input
               value={f.buyer}
-              onChange={e => onChange('buyer', e.target.value)}
+              onChange={(e) => onChange('buyer', e.target.value)}
               className="rounded-xl border px-3 py-2"
               required
             />
@@ -335,7 +376,7 @@ export default function AdminTendersPage() {
               <label className="text-sm font-medium">Sector</label>
               <select
                 value={f.sector}
-                onChange={e => onChange('sector', e.target.value as Sector)}
+                onChange={(e) => onChange('sector', e.target.value as Sector)}
                 className="rounded-xl border px-3 py-2"
               >
                 <option value="OIL_GAS">OIL_GAS</option>
@@ -346,14 +387,50 @@ export default function AdminTendersPage() {
             </div>
 
             <div className="grid gap-2">
+              <label className="text-sm font-medium">Status</label>
+              <select
+                value={f.status}
+                onChange={(e) => onChange('status', e.target.value as Status)}
+                className="rounded-xl border px-3 py-2"
+              >
+                <option value="OPEN">OPEN</option>
+                <option value="PREQUALIFICATION">PREQUALIFICATION</option>
+                <option value="CLOSED">CLOSED</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Contract</label>
+              <select
+                value={f.contract}
+                onChange={(e) => onChange('contract', e.target.value as Contract)}
+                className="rounded-xl border px-3 py-2"
+              >
+                {contractOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid gap-2">
               <label className="text-sm font-medium">Provinsi</label>
               <select
                 value={f.provinceId}
-                onChange={e => onChange('provinceId', e.target.value)}
+                onChange={(e) => onChange('provinceId', e.target.value)}
                 className="rounded-xl border px-3 py-2"
               >
-                <option value="" disabled>Pilih provinsi…</option>
-                {provinces.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="" disabled>
+                  Pilih provinsi…
+                </option>
+                {provinces.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -362,13 +439,19 @@ export default function AdminTendersPage() {
             <label className="text-sm font-medium">Kabupaten / Kota</label>
             <select
               value={f.regencyId}
-              onChange={e => onChange('regencyId', e.target.value)}
+              onChange={(e) => onChange('regencyId', e.target.value)}
               className="rounded-xl border px-3 py-2"
               disabled={!f.provinceId}
               required
             >
-              <option value="" disabled>{f.provinceId ? 'Pilih kabupaten/kota…' : 'Pilih provinsi dulu'}</option>
-              {regencies.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              <option value="" disabled>
+                {f.provinceId ? 'Pilih kabupaten/kota…' : 'Pilih provinsi dulu'}
+              </option>
+              {regencies.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
             </select>
             <p className="text-xs text-neutral-500">Pilih provinsi terlebih dahulu untuk memuat kabupaten/kota.</p>
           </div>
@@ -379,13 +462,12 @@ export default function AdminTendersPage() {
               <label className="text-sm font-medium">Nilai Proyek (IDR)</label>
               <input
                 value={f.budgetIDR}
-                onChange={e => onChange('budgetIDR', e.target.value)}
+                onChange={(e) => onChange('budgetIDR', formatIDRLive(e.target.value))}
                 placeholder="contoh: 1.000.000"
                 className="rounded-xl border px-3 py-2"
+                inputMode="numeric"
               />
-              <p className="text-xs text-neutral-500">
-                Disimpan ke database **sebagai IDR** (tanpa konversi).
-              </p>
+              <p className="text-xs text-neutral-500">Disimpan ke database sebagai IDR (tanpa konversi).</p>
             </div>
 
             <div className="grid gap-2">
@@ -393,7 +475,7 @@ export default function AdminTendersPage() {
               <input
                 type="date"
                 value={f.deadline}
-                onChange={e => onChange('deadline', e.target.value)}
+                onChange={(e) => onChange('deadline', e.target.value)}
                 className="rounded-xl border px-3 py-2"
               />
             </div>
@@ -403,7 +485,7 @@ export default function AdminTendersPage() {
             <label className="text-sm font-medium">Description</label>
             <textarea
               value={f.description}
-              onChange={e => onChange('description', e.target.value)}
+              onChange={(e) => onChange('description', e.target.value)}
               className="min-h-32 rounded-xl border px-3 py-2"
             />
           </div>
@@ -412,7 +494,7 @@ export default function AdminTendersPage() {
             <label className="text-sm font-medium">Documents (comma separated)</label>
             <input
               value={f.documentsCsv}
-              onChange={e => onChange('documentsCsv', e.target.value)}
+              onChange={(e) => onChange('documentsCsv', e.target.value)}
               className="rounded-xl border px-3 py-2"
               placeholder="RFP.pdf, BoQ.xlsx"
             />
@@ -454,13 +536,9 @@ export default function AdminTendersPage() {
         )}
 
         {loadingList ? (
-          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-neutral-600">
-            Loading…
-          </div>
+          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-neutral-600">Loading…</div>
         ) : list.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-neutral-600">
-            No tenders yet.
-          </div>
+          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-neutral-600">No tenders yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
@@ -477,8 +555,8 @@ export default function AdminTendersPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.map(r => {
-                  const idr = Math.max(0, Number(r.budgetUSD || 0)); // ⬅️ tampilkan angka IDR apa adanya
+                {list.map((r) => {
+                  const idr = Math.max(0, Number(r.budgetUSD || 0)); // tampilkan IDR apa adanya
                   return (
                     <tr key={r.id} className="border-b last:border-0">
                       <Td className="font-medium">{r.title}</Td>
@@ -488,7 +566,14 @@ export default function AdminTendersPage() {
                       <Td>{r.contract}</Td>
                       <Td>{moneyFmtIDR.format(idr)}</Td>
                       <Td>{fmtDate(r.deadline)}</Td>
-                      <Td className="text-right">
+                      <Td className="text-right space-x-2">
+                        <button
+                          onClick={() => setEditing(r)}
+                          className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs hover:bg-neutral-50"
+                          title="Edit"
+                        >
+                          Edit
+                        </button>
                         <button
                           onClick={() => onDelete(r.id)}
                           className="rounded-lg border border-red-500 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50"
@@ -505,6 +590,227 @@ export default function AdminTendersPage() {
           </div>
         )}
       </div>
+
+      {/* Modal edit — hanya render saat editing ada */}
+      {editing && (
+        <EditTenderModal
+          data={editing!}
+          onClose={() => setEditing(null)}
+          onUpdated={fetchList}
+          contractOptions={contractOptions}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------ Edit Modal (data: Tender NON-NULLABLE) ------------ */
+function EditTenderModal({
+  data,
+  onClose,
+  onUpdated,
+  contractOptions,
+}: {
+  data: Tender; // <<— BUKAN nullable
+  onClose: () => void;
+  onUpdated: () => void;
+  contractOptions: Contract[];
+}) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [title, setTitle] = useState(data.title);
+  const [buyer, setBuyer] = useState(data.buyer);
+  const [sector, setSector] = useState<Sector>(data.sector);
+  const [status, setStatus] = useState<Status>(data.status);
+  const [contract, setContract] = useState<Contract>(data.contract);
+  const [location, setLocation] = useState(data.location);
+  const [budgetIDR, setBudgetIDR] = useState<string>(formatIDRLive(String(data.budgetUSD || '')));
+  const [deadline, setDeadline] = useState<string>(toYMD(data.deadline));
+  const [description, setDescription] = useState(data.description || '');
+  const [documentsCsv, setDocumentsCsv] = useState((data.documents || []).join(', '));
+
+  async function onSave(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+
+    if (!title.trim() || !buyer.trim()) {
+      setErr('Mohon isi Title dan Owner.');
+      return;
+    }
+    const idr = unformatIDR(budgetIDR);
+    const payload = {
+      title: title.trim(),
+      buyer: buyer.trim(),
+      sector,
+      status,
+      contract,
+      location: location.trim(),
+      budgetUSD: Math.max(0, Math.round(idr)), // tetap IDR
+      deadline: new Date(deadline + 'T00:00:00').toISOString(),
+      description: description.trim(),
+      documents: documentsCsv.split(',').map((s) => s.trim()).filter(Boolean),
+    };
+
+    setSaving(true);
+    try {
+      await api(`${PATH_ADMIN_TENDERS}/${data.id}`, { method: 'PUT', json: payload, expectJson: false });
+      onClose();
+      onUpdated();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to update tender');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100]">
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {/* sheet */}
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-3xl h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col">
+          {/* header */}
+          <div className="shrink-0 px-6 py-4 border-b border-neutral-200 flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-neutral-900">Edit Tender</h3>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50"
+            >
+              Close
+            </button>
+          </div>
+
+          {/* body scrollable */}
+          <form onSubmit={onSave} className="grow overflow-y-auto px-6 py-5 space-y-4">
+            {err && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {err}
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Title</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className="rounded-xl border px-3 py-2" />
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Owner</label>
+              <input value={buyer} onChange={(e) => setBuyer(e.target.value)} className="rounded-xl border px-3 py-2" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Sector</label>
+                <select
+                  value={sector}
+                  onChange={(e) => setSector(e.target.value as Sector)}
+                  className="rounded-xl border px-3 py-2"
+                >
+                  <option value="OIL_GAS">OIL_GAS</option>
+                  <option value="RENEWABLE_ENERGY">RENEWABLE_ENERGY</option>
+                  <option value="UTILITIES">UTILITIES</option>
+                  <option value="ENGINEERING">ENGINEERING</option>
+                </select>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as Status)}
+                  className="rounded-xl border px-3 py-2"
+                >
+                  <option value="OPEN">OPEN</option>
+                  <option value="PREQUALIFICATION">PREQUALIFICATION</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Contract</label>
+                <select
+                  value={contract}
+                  onChange={(e) => setContract(e.target.value as Contract)}
+                  className="rounded-xl border px-3 py-2"
+                >
+                  {contractOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Deadline</label>
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  className="rounded-xl border px-3 py-2"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Location</label>
+              <input
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="rounded-xl border px-3 py-2"
+                placeholder="Kab/Kota, Provinsi"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Nilai Proyek (IDR)</label>
+              <input
+                value={budgetIDR}
+                onChange={(e) => setBudgetIDR(formatIDRLive(e.target.value))}
+                className="rounded-xl border px-3 py-2"
+                inputMode="numeric"
+              />
+              <p className="text-xs text-neutral-500">Tersimpan sebagai IDR (tanpa konversi).</p>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="min-h-32 rounded-xl border px-3 py-2"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Documents (comma separated)</label>
+              <input
+                value={documentsCsv}
+                onChange={(e) => setDocumentsCsv(e.target.value)}
+                className="rounded-xl border px-3 py-2"
+              />
+            </div>
+          </form>
+
+          {/* footer fixed */}
+          <div className="shrink-0 px-6 py-4 border-t border-neutral-200 flex items-center justify-end gap-3">
+            <button onClick={onClose} className="rounded-xl border px-4 py-2 text-sm hover:bg-neutral-50">
+              Cancel
+            </button>
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -515,4 +821,25 @@ function Th({ children, className = '' }: { children: React.ReactNode; className
 }
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-3 py-2 align-top ${className}`}>{children}</td>;
+}
+
+/* ---- util untuk modal ---- */
+function toYMD(iso: string) {
+  try {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  } catch {
+    return ymdToday();
+  }
+}
+/** live formatter: "1000000" -> "1.000.000" (hanya digit) */
+function formatIDRLive(input: string) {
+  const digits = (input || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  const parts = [];
+  for (let i = digits.length; i > 0; i -= 3) {
+    const start = Math.max(0, i - 3);
+    parts.unshift(digits.slice(start, i));
+  }
+  return parts.join('.');
 }

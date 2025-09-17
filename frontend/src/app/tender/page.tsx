@@ -32,7 +32,18 @@ type TenderDTO = {
   sector: 'OIL_GAS' | 'RENEWABLE_ENERGY' | 'UTILITIES' | 'ENGINEERING';
   location: string;
   status: 'OPEN' | 'PREQUALIFICATION' | 'CLOSED';
-  contract: 'EPC' | 'SUPPLY' | 'CONSULTING' | 'MAINTENANCE';
+  contract:
+    | 'EPC'
+    | 'SUPPLY'
+    | 'CONSULTING'
+    | 'MAINTENANCE'
+    | 'PSC'
+    | 'SERVICE'
+    | 'JOC'
+    | 'TURNKEY'
+    | 'LOGISTICS'
+    | 'DRILLING'
+    | 'O_M';
   budgetUSD: number;               // ⬅️ di DB; ISINYA IDR
   deadline: string;                // ISO
   description: string;
@@ -43,7 +54,18 @@ type TenderDTO = {
 /* ---------------- Types (UI) ---------------- */
 type SectorUI = 'Oil & Gas' | 'Renewable Energy' | 'Utilities' | 'Engineering';
 type StatusUI = 'Open' | 'Prequalification' | 'Closed';
-type ContractUI = 'EPC' | 'Supply' | 'Consulting' | 'Maintenance';
+type ContractUI =
+  | 'EPC'
+  | 'Supply'
+  | 'Consulting'
+  | 'Maintenance'
+  | 'PSC'
+  | 'Service'
+  | 'JOC'
+  | 'Turnkey'
+  | 'Logistics'
+  | 'Drilling'
+  | 'O&M';
 
 type Tender = {
   id: number | string;
@@ -93,6 +115,13 @@ function adaptContract(s: TenderDTO['contract']): ContractUI {
     case 'SUPPLY': return 'Supply';
     case 'CONSULTING': return 'Consulting';
     case 'MAINTENANCE': return 'Maintenance';
+    case 'PSC': return 'PSC';
+    case 'SERVICE': return 'Service';
+    case 'JOC': return 'JOC';
+    case 'TURNKEY': return 'Turnkey';
+    case 'LOGISTICS': return 'Logistics';
+    case 'DRILLING': return 'Drilling';
+    case 'O_M': return 'O&M';
     default: return 'EPC';
   }
 }
@@ -366,7 +395,20 @@ export default function TendersLikeJobsPage() {
               label="Kontrak"
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
-              options={['', 'EPC', 'Supply', 'Consulting', 'Maintenance']}
+              options={[
+                '',
+                'EPC',
+                'Supply',
+                'Consulting',
+                'Maintenance',
+                'PSC',
+                'Service',
+                'JOC',
+                'Turnkey',
+                'Logistics',
+                'Drilling',
+                'O&M',
+              ]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
 
@@ -504,7 +546,20 @@ export default function TendersLikeJobsPage() {
               label="Kontrak"
               value={filters.contract}
               onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
-              options={['', 'EPC', 'Supply', 'Consulting', 'Maintenance']}
+              options={[
+                '',
+                'EPC',
+                'Supply',
+                'Consulting',
+                'Maintenance',
+                'PSC',
+                'Service',
+                'JOC',
+                'Turnkey',
+                'Logistics',
+                'Drilling',
+                'O&M',
+              ]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
 
@@ -629,6 +684,15 @@ function DetailModal({
   dateFmt: (ymd: string) => string;
   postedText: string;
 }) {
+  // bikin dokumen bisa diklik (http/https/blob/relative)
+  const base = API.replace(/\/+$/, '');
+  const docHref = (d: string) => {
+    if (/^(https?:\/\/|blob:)/i.test(d)) return d;
+    if (d.startsWith('/')) return d; // sudah absolute path
+    // fallback: anggap file di server uploads
+    return `${base}/uploads/${encodeURIComponent(d)}`;
+  };
+
   return (
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
@@ -668,14 +732,28 @@ function DetailModal({
                 <div className="text-sm text-slate-600">Tidak ada dokumen.</div>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {tender.documents.map((d) => (
-                    <span
-                      key={d}
-                      className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs"
-                    >
-                      <PaperIcon className="h-3 w-3" /> {d}
-                    </span>
-                  ))}
+                  {tender.documents.map((d) => {
+                    const href = docHref(d);
+                    const isClickable = /^(https?:\/\/|blob:|\/)/i.test(href);
+                    return isClickable ? (
+                      <a
+                        key={d}
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs text-blue-700 underline"
+                      >
+                        <PaperIcon className="h-3 w-3" /> {d}
+                      </a>
+                    ) : (
+                      <span
+                        key={d}
+                        className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs"
+                      >
+                        <PaperIcon className="h-3 w-3" /> {d}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </Section>
@@ -886,4 +964,3 @@ function AvatarLogo({ name, size = 64 }: { name?: string; size?: number }) {
     </div>
   );
 }
-  

@@ -2,9 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { API } from "@/lib/api";
+// import { API } from "@/lib/api"; // tidak digunakan di file ini
 import ReportDialog from "@/app/admin/reports/ReportDialog";
-  
+
 /* ---------------- Server base ---------------- */
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ||
@@ -302,7 +302,8 @@ export default function JobsPage() {
           }
           const eid = localStorage.getItem("ark_employer_id");
           if (eid) {
-            const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
+            // per backend: /api/employers/*
+            const r2 = await fetch(`${base}/api/employers/jobs?employerId=${encodeURIComponent(eid)}`, opts);
             if (alive && r2.ok) {
               const j2 = await r2.json().catch(() => null);
               const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
@@ -490,26 +491,30 @@ export default function JobsPage() {
             <FilterSelect
               label={t("filters.function")}
               value={filters.func}
-              onChange={(v) => setFilters((s) => ({ ...s, func: v }))} options={["", "Engineering", "Operations", "Management"]}
+              onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
+              options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.workmode")}
               value={filters.remote}
-              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))} options={["", "On-site", "Remote", "Hybrid"]}
+              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
+              options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
             {/* NEW: Pengalaman & Pendidikan */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
-              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))} options={["", "0-1", "1-3", "3-5", "5+"]}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
+              options={["", "0-1", "1-3", "3-5", "5+"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={"Pendidikan"}
               value={filters.edu}
-              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))} options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
+              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
 
@@ -610,43 +615,50 @@ export default function JobsPage() {
             <FilterInput
               label={t("filters.location")}
               value={filters.loc}
-              onChange={(v) => setFilters((s) => ({ ...s, loc: v }))} icon={<PinIcon className="h-4 w-4" />}
+              onChange={(v) => setFilters((s) => ({ ...s, loc: v }))}
+              icon={<PinIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.industry")}
               value={filters.industry}
-              onChange={(v) => setFilters((s) => ({ ...s, industry: v }))} options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
+              onChange={(v) => setFilters((s) => ({ ...s, industry: v }))}
+              options={["", "Oil & Gas", "Renewable Energy", "Mining"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.contract")}
               value={filters.contract}
-              onChange={(v) => setFilters((s) => ({ ...s, contract: v }))} options={["", "Full-time", "Contract", "Part-time"]}
+              onChange={(v) => setFilters((s) => ({ ...s, contract: v }))}
+              options={["", "Full-time", "Contract", "Part-time"]}
               icon={<BriefcaseIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.function")}
               value={filters.func}
-              onChange={(v) => setFilters((s) => ({ ...s, func: v }))} options={["", "Engineering", "Operations", "Management"]}
+              onChange={(v) => setFilters((s) => ({ ...s, func: v }))}
+              options={["", "Engineering", "Operations", "Management"]}
               icon={<CogIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={t("filters.workmode")}
               value={filters.remote}
-              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))} options={["", "On-site", "Remote", "Hybrid"]}
+              onChange={(v) => setFilters((s) => ({ ...s, remote: v }))}
+              options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
             {/* NEW (mobile) */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
-              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))} options={["", "0-1", "1-3", "3-5", "5+"]}
+              onChange={(v) => setFilters((s) => ({ ...s, exp: v }))}
+              options={["", "0-1", "1-3", "3-5", "5+"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <FilterSelect
               label={"Pendidikan"}
               value={filters.edu}
-              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))} options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
+              onChange={(v) => setFilters((s) => ({ ...s, edu: v }))}
+              options={["", "SMA/SMK", "D3", "S1", "S2", "S3"]}
               icon={<LayersIcon className="h-4 w-4" />}
             />
             <div className="pt-2 flex items-center justify-between">
@@ -977,177 +989,6 @@ function AvatarLogo({ name, src, size = 64 }: { name?: string; src?: string | nu
       ) : (
         <span className="select-none text-xl">{initials(name || "AW")}</span>
       )}
-    </div>
-  );
-}
-
-/* ======================================================================= */
-/* =========================  CV ATS COMPONENTS  ========================= */
-/* ======================================================================= */
-
-type CvData = {
-  name: string;
-  email: string;
-  location?: string;
-  phone?: string;
-  about?: string;
-  experience?: string;
-  education?: string;
-  organizations?: string;
-  certifications?: string;
-  skills?: string[];
-};
-
-export function CvPreviewModalATS({ onClose, data }: { onClose: () => void; data: CvData; }) {
-  const printPDF = () => window.print();
-
-  return (
-    <div className="fixed inset-0 z-[120] grid place-items-center" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative m-3 w-[min(95vw,900px)] overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 print:hidden">
-          <div className="text-sm font-medium text-neutral-800">Preview CV (ATS)</div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={printPDF}
-              className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-800"
-            >
-              Download PDF
-            </button>
-            <button
-              onClick={onClose}
-              className="rounded-xl border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
-            >
-              Tutup
-            </button>
-          </div>
-        </div>
-
-        <div className="max-h-[82vh] overflow-auto p-4 print:p-0">
-          <div className="cv-a4 mx-auto bg-white">
-            <header className="px-8 pt-10 pb-4 text-left border-b border-neutral-300">
-              <h1 className="text-2xl font-bold tracking-widest uppercase text-neutral-900">
-                {data.name || "Nama Lengkap"}
-              </h1>
-              <p className="mt-1 text-[13px] text-neutral-700">
-                {data.email}
-                {data.phone ? <> | {data.phone}</> : null}
-                {data.location ? <> | {data.location}</> : null}
-              </p>
-            </header>
-
-            <section className="px-8 py-5">
-              <CvBlock title="RINGKASAN">
-                <CvPara text={data.about || "Tuliskan ringkasan singkat tentang diri Anda: keahlian inti, minat, dan tujuan karier."} />
-              </CvBlock>
-
-              <CvBlock title="PENGALAMAN KERJA">
-                <CvPara
-                  text={
-                    data.experience ||
-                    `Contoh:
-Freelance Web Developer — Jan 2024 – Sekarang
-• Mendesain & mengembangkan website untuk klien.
-• Maintenance dan optimasi performa.`
-                  }
-                />
-              </CvBlock>
-
-              <CvBlock title="ORGANISASI">
-                <CvPara
-                  text={
-                    data.organizations ||
-                    `Contoh:
-Ketua Divisi AI — Himpunan Mahasiswa, 2025 – Sekarang
-• Menginisiasi & menyelenggarakan pelatihan mingguan seputar AI.`
-                  }
-                />
-              </CvBlock>
-
-              <CvBlock title="PENDIDIKAN">
-                <CvPara
-                  text={
-                    data.education ||
-                    `Contoh:
-Universitas X — Informatika (2021 – Sekarang)
-IPK: 3.xx/4.00`
-                  }
-                />
-              </CvBlock>
-
-              <CvBlock title="SERTIFIKASI">
-                <CvPara text={data.certifications || "Sertifikasi Profesi Junior Web Developer (BNSP) — 2024"} />
-              </CvBlock>
-
-              <CvBlock title="SKILLS">
-                {data.skills && data.skills.length > 0 ? (
-                  <ul className="flex flex-wrap gap-2 text-[13px]">
-                    {data.skills.map((s, i) => (
-                      <li key={i} className="rounded-full border border-neutral-300 px-3 py-1">
-                        {s}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <CvPara text="Tambahkan keahlian Anda (pisahkan dengan koma) di halaman Profile." />
-                )}
-              </CvBlock>
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <style jsx global>{`
-        .cv-a4{ width: 794px; min-height: 1123px; }
-        @media print {
-          html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
-          * { box-shadow: none !important; text-shadow: none !important; background: transparent !important; }
-          .cv-a4{ width: 210mm; min-height: 297mm; }
-          @page { size: A4; margin: 12mm 14mm; }
-          body > div[role="dialog"], .print\\:hidden { display: none !important; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-export function CvBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-5 break-inside-avoid">
-      <h2 className="mb-2 border-b border-neutral-300 pb-1 text-[13px] font-semibold tracking-wide text-neutral-800">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-export function CvPara({ text }: { text: string }) {
-  const lines = useMemo(
-    () =>
-      (text || "")
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean),
-    [text]
-  );
-  const isList = useMemo(() => lines.some((l) => /^[-•]/.test(l)), [lines]);
-
-  if (isList) {
-    const items = lines.map((l) => l.replace(/^[-•]\s?/, "")).filter(Boolean);
-    return (
-      <ul className="list-disc pl-5 text-[13px] leading-6 text-neutral-800">
-        {items.map((it, idx) => (
-          <li key={idx}>{it}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5 text-[13px] leading-6 text-neutral-800">
-      {lines.map((l, i) => (
-        <p key={i}>{l}</p>
-      ))}
     </div>
   );
 }

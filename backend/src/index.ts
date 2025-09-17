@@ -1,4 +1,3 @@
-// src/index.ts
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -19,8 +18,8 @@ import paymentsRouter from './routes/payments';
 import tendersRouter from './routes/tenders';
 import adminTendersRouter from './routes/admin-tenders';
 import { jobsRouter } from './routes/jobs';
-import reportsRouter from './routes/reports';
-import ratesRouter from './routes/rates'; // ✅ kurs API
+import reportsRouter from './routes/reports'; // <-- Reports router
+import ratesRouter from './routes/rates';
 
 /* --------------------------- Role guards (opt) --------------------------- */
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -29,11 +28,7 @@ const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const DEFAULT_PORT = Number(process.env.PORT || 4000);
 
-/* =========================================================================
-   C O R S
-   FRONTEND_ORIGIN bisa multi (comma separated), contoh:
-   FRONTEND_ORIGIN="http://localhost:3000,http://127.0.0.1:5173,https://*.vercel.app"
-   ======================================================================= */
+/* ------------------------------- CORS ---------------------------------- */
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
 
 const defaultAllowed = [
@@ -45,7 +40,7 @@ const defaultAllowed = [
   'http://127.0.0.1:5173',
 ];
 
-const envAllowed = FRONTEND_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
+const envAllowed = FRONTEND_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
 const allowedOrigins = Array.from(new Set([...defaultAllowed, ...envAllowed]));
 
 function isLocalhost(origin?: string) {
@@ -57,6 +52,7 @@ function isLocalhost(origin?: string) {
     return false;
   }
 }
+
 function isVercel(origin?: string) {
   try {
     if (!origin) return false;
@@ -69,10 +65,10 @@ function isVercel(origin?: string) {
 
 const corsOptions: cors.CorsOptions = {
   origin(origin, cb) {
-    if (!origin) return cb(null, true);                // server-to-server / tools
+    if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    if (isLocalhost(origin)) return cb(null, true);    // allow all localhost ports
-    if (isVercel(origin)) return cb(null, true);       // allow vercel previews
+    if (isLocalhost(origin)) return cb(null, true);
+    if (isVercel(origin)) return cb(null, true);
     return cb(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
@@ -81,7 +77,7 @@ const corsOptions: cors.CorsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // preflight global
+app.options('*', cors(corsOptions));
 
 /* ------------------------------- Basics --------------------------------- */
 if (NODE_ENV === 'production') app.set('trust proxy', 1);
@@ -91,13 +87,6 @@ app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 
 /* ------------------ Middleware: BigInt -> string for res.json ------------ */
-/**
- * Patch res.json supaya semua nilai BigInt dikonversi ke string
- * sebelum dikirim ke client. Mencegah error:
- * "Do not know how to serialize a BigInt"
- *
- * TARUH SEBELUM REGISTRASI ROUTE.
- */
 app.use((_req, res, next) => {
   function convertBigInt(obj: any): any {
     if (obj === null || obj === undefined) return obj;
@@ -111,18 +100,8 @@ app.use((_req, res, next) => {
     return obj;
   }
 
-  // bind ke res supaya tidak pakai `this`
   const oldJson = res.json.bind(res);
-
-  const patched: typeof res.json = (body?: any) => {
-    try {
-      return oldJson(convertBigInt(body));
-    } catch {
-      return oldJson(body as any);
-    }
-  };
-
-  res.json = patched;
+  res.json = (body?: any) => oldJson(convertBigInt(body));
   next();
 });
 
@@ -147,13 +126,13 @@ app.use('/auth', authRouter);
 app.use('/admin', adminRouter);
 
 // Laporan
-app.use('/api/reports', reportsRouter);
+app.use('/api/reports', reportsRouter); // <-- reports integrated
 
 // News & Chat
 app.use('/api/news', newsRouter);
 app.use('/api/chat', chatRouter);
 
-// Rates (kurs)  ✅ ini yang dibutuhkan FE
+// Rates (kurs)
 app.use('/api/rates', ratesRouter);
 
 // Tenders (public)
@@ -198,9 +177,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(403).json({ error: 'CORS: Origin not allowed' });
   }
   if (NODE_ENV !== 'production') {
-    return res
-      .status(500)
-      .json({ error: err?.message || 'Internal server error', stack: err?.stack });
+    return res.status(500).json({ error: err?.message || 'Internal server error', stack: err?.stack });
   }
   res.status(500).json({ error: 'Internal server error' });
 });

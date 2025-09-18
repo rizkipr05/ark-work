@@ -306,6 +306,18 @@ model Session {
   @@map("sessions")
 }
 
+model Report {
+  id         String   @id @default(cuid())
+  judul      String
+  perusahaan String
+  alasan     String?
+  catatan    String?
+  status     String   @default("baru")
+  dibuatPada DateTime @default(now())
+
+  @@index([status])
+}
+
 /// ===================== Tender Enums =====================
 enum Sector {
   OIL_GAS
@@ -372,16 +384,4 @@ enum OnboardingStep {
   DONE
 
   @@map("onboarding_step")
-}
-
-model Report {
-  id         String   @id @default(cuid())
-  judul      String
-  perusahaan String
-  alasan     String?   // optional
-  catatan    String?   // optional
-  status     String    @default("baru")
-  dibuatPada DateTime  @default(now())
-
-  @@index([status])
 }

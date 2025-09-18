@@ -773,7 +773,25 @@ function AtsCvModal({
   onClose: () => void;
   data: CvData;
 }) {
-  const printPDF = () => window.print();
+  // === GANTI: generate PDF tanpa header/footer browser
+  const downloadAsPDF = async () => {
+    const el = document.querySelector('.cv-a4') as HTMLElement | null;
+    if (!el) return;
+
+    const html2pdf = (await import('html2pdf.js')).default;
+    const filenameSafe = (data.name || 'CV_ATS').replace(/\s+/g, '_');
+
+    await html2pdf()
+      .set({
+        margin: [12, 14], // mm — sinkron dengan @page di CSS
+        filename: `${filenameSafe}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(el)
+      .save();
+  };
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center" role="dialog" aria-modal="true">
@@ -787,7 +805,7 @@ function AtsCvModal({
           <div className="text-sm font-medium text-neutral-800">Preview CV</div>
           <div className="flex items-center gap-2">
             <button
-              onClick={printPDF}
+              onClick={downloadAsPDF}  // <— pakai html2pdf
               className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-800"
             >
               Download PDF

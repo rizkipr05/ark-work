@@ -3,13 +3,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
-import ReportDialog from "@/app/admin/reports/ReportDialog";
 
 /* ---------------- Server base ---------------- */
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_URL ||
   (process.env.NODE_ENV === "development" ? "http://localhost:4000" : "");
+
+/* -------- Report Dialog (dynamic supaya bukan RSC) -------- */
+const ReportDialog = dynamic(() => import("@/app/admin/reports/ReportDialog"), { ssr: false });
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -250,6 +252,7 @@ export default function JobsPage() {
     edu: "",
   });
   const [saved, setSaved] = useState<string[]>([]);
+  const [applied, setApplied] = useState<string[]>([]);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [drawer, setDrawer] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -257,12 +260,6 @@ export default function JobsPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailJob, setDetailJob] = useState<Job | null>(null);
 
-  // ⬆️ menjadi dynamic supaya Next TIDAK mencoba treat sebagai RSC dari route lain
-  const ReportDialog = dynamic(() => import("@/app/admin/reports/ReportDialog"), {
-    ssr: false,
-  });
-
-  // Report dialog state (pakai ReportDialog eksternal)
   const [reportOpen, setReportOpen] = useState(false);
   const [reportDefaults, setReportDefaults] = useState<{
     judul?: string;
@@ -270,6 +267,18 @@ export default function JobsPage() {
     alasan?: string;
     catatan?: string;
   }>({});
+
+  // Sinkronkan auth → ark_current (ganti cara ambil ID di sini sesuai app-mu)
+  useEffect(() => {
+    try {
+      // contoh: kalau auth-mu menyimpan userId ke window/__AUTH_USER_ID__
+      const userIdFromAuth = (window as any).__AUTH_USER_ID__ || null;
+      if (userIdFromAuth && localStorage.getItem("ark_current") !== String(userIdFromAuth)) {
+        localStorage.setItem("ark_current", String(userIdFromAuth));
+        window.dispatchEvent(new Event("storage"));
+      }
+    } catch {}
+  }, []);
 
   const readLocal = (): LocalJob[] => {
     try {
@@ -284,6 +293,18 @@ export default function JobsPage() {
     const normalized = normalizeLocal(ls);
     const sorted = normalized.sort((a, b) => sortByPosted(a, b, sort === "newest"));
     setJobs(sorted);
+  };
+
+  const refreshAppliedForCurrent = () => {
+    try {
+      const cur = localStorage.getItem("ark_current");
+      if (!cur) return setApplied([]);
+      const apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
+      const arr: { jobId: string }[] = apps[cur] ?? [];
+      setApplied(arr.map((a) => String(a.jobId)));
+    } catch {
+      setApplied([]);
+    }
   };
 
   useEffect(() => {
@@ -307,7 +328,6 @@ export default function JobsPage() {
           }
           const eid = localStorage.getItem("ark_employer_id");
           if (eid) {
-            // per backend: /api/employers/*
             const r2 = await fetch(`${base}/api/employers/jobs?employerId=${encodeURIComponent(eid)}`, opts);
             if (alive && r2.ok) {
               const j2 = await r2.json().catch(() => null);
@@ -334,11 +354,19 @@ export default function JobsPage() {
       setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
     } catch {}
 
-    const onUpd = () => refreshFromLocal();
+    refreshAppliedForCurrent();
+
+    const onUpd = () => {
+      refreshFromLocal();
+      refreshAppliedForCurrent();
+    };
     window.addEventListener("ark:jobs-updated", onUpd);
+    window.addEventListener("storage", onUpd);
+
     return () => {
       ac.abort();
       window.removeEventListener("ark:jobs-updated", onUpd);
+      window.removeEventListener("storage", onUpd);
     };
   }, [sort]);
 
@@ -386,26 +414,63 @@ export default function JobsPage() {
     setDetailOpen(true);
   }
 
-  function applySelected(sel: Job | null) {
+  // ===== APPLY (API + fallback localStorage) =====
+  async function applySelected(sel: Job | null) {
     if (!sel) return;
+
     const cur = localStorage.getItem("ark_current");
     if (!cur) {
       alert("Silakan login terlebih dahulu untuk melamar.");
       return;
     }
-    const apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
-    const arr = apps[cur] ?? [];
-    if (arr.find((a: any) => a.jobId === sel.id)) {
+
+    // Baca ark_apps aman
+    let apps: Record<string, { jobId: string; date: string }[]> = {};
+    try {
+      const raw = localStorage.getItem("ark_apps");
+      apps = raw ? JSON.parse(raw) : {};
+      if (!apps || typeof apps !== "object") throw new Error("invalid ark_apps");
+    } catch {
+      console.warn("[apply] ark_apps corrupt -> reset");
+      apps = {};
+    }
+
+    const jobId = String(sel.id);
+    const userArr = Array.isArray(apps[cur]) ? apps[cur] : [];
+
+    if (userArr.some((a) => String(a.jobId) === jobId)) {
       alert("Anda sudah melamar lowongan ini.");
       return;
     }
-    arr.push({ jobId: sel.id, date: new Date().toISOString().split("T")[0] });
-    apps[cur] = arr;
+
+    const base = (API_BASE || "").replace(/\/+$/, "");
+    let sentToServer = false;
+
+    if (base) {
+      try {
+        const res = await fetch(`${base}/api/applications`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ jobId, applicantId: cur }),
+        });
+        if (!res.ok) throw new Error(`Server ${res.status}`);
+        sentToServer = true;
+      } catch (e) {
+        console.error("[apply] API gagal, fallback ke local:", e);
+      }
+    }
+
+    // Simpan lokal (selalu) agar ada jejak
+    const next = [...userArr, { jobId, date: new Date().toISOString().slice(0, 10) }];
+    apps[cur] = next;
     localStorage.setItem("ark_apps", JSON.stringify(apps));
+    try { setApplied((s) => [...new Set([...s, jobId])]); } catch {}
+
     setDetailOpen(false);
+    alert(sentToServer ? "Lamaran terkirim!" : "Lamaran tersimpan (lokal).");
   }
 
-  // Dipanggil dari DetailModal saat tombol "Laporkan" di-klik
   function onReport(job: Job) {
     setReportDefaults({
       judul: job.title,
@@ -507,7 +572,6 @@ export default function JobsPage() {
               options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
-            {/* NEW: Pengalaman & Pendidikan */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
@@ -539,76 +603,88 @@ export default function JobsPage() {
           {items.length === 0 ? (
             <EmptyState t={t} />
           ) : (
-            items.map((job) => (
-              <article
-                key={job.id}
-                onClick={() => openDetail(job)}
-                className="group cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
-              >
-                <div className="flex gap-4">
-                  <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
-                    {job.logo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img alt={job.company || "logo"} src={job.logo} className="h-full w-full object-cover" />
-                    ) : (
-                      initials(job.company || "AW")
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="truncate text-base md:text-lg font-semibold text-neutral-900">
-                          {job.title}
-                        </h3>
-                        <p className="text-sm text-neutral-600 truncate">{job.company || t("common.company")}</p>
+            items.map((job) => {
+              const isApplied = applied.includes(String(job.id));
+              return (
+                <article
+                  key={job.id}
+                  onClick={() => openDetail(job)}
+                  className="group cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md transition"
+                >
+                  <div className="flex gap-4">
+                    <div className="h-12 w-12 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-blue-500 to-amber-400 grid place-items-center overflow-hidden text-white text-sm font-bold">
+                      {job.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img alt={job.company || "logo"} src={job.logo} className="h-full w-full object-cover" />
+                      ) : (
+                        initials(job.company || "AW")
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-base md:text-lg font-semibold text-neutral-900">
+                            {job.title}
+                          </h3>
+                          <p className="text-sm text-neutral-600 truncate">
+                            {job.company || t("common.company")}
+                          </p>
+                        </div>
+
+                        <span
+                          className={[
+                            "rounded-lg border px-2 py-1 text-xs",
+                            isApplied
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                              : "border-neutral-300 text-neutral-700",
+                          ].join(" ")}
+                        >
+                          {isApplied ? "Sudah dilamar" : t("common.view")}
+                        </span>
                       </div>
-                      <span className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-700">
-                        {t("common.view")}
-                      </span>
-                    </div>
 
-                    {/* meta row */}
-                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 text-[13px]">
-                      <Meta icon={<PinIcon className="h-4 w-4" />} text={job.location} />
-                      <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={job.contract} />
-                      <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.industry} />
-                      <Meta icon={<GlobeIcon className="h-4 w-4" />} text={job.remote} />
-                      {job.experience && job.experience !== "Any" ? (
-                        <Meta icon={<CogIcon className="h-4 w-4" />} text={`${job.experience} thn`} />
-                      ) : null}
-                      {job.education && job.education !== "Any" ? (
-                        <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.education} />
-                      ) : null}
-                      {job.salaryMin != null || job.salaryMax != null ? (
-                        <Meta icon={<MoneyIcon className="h-4 w-4" />} text={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
-                      ) : null}
-                    </div>
+                      <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 text-[13px]">
+                        <Meta icon={<PinIcon className="h-4 w-4" />} text={job.location} />
+                        <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={job.contract} />
+                        <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.industry} />
+                        <Meta icon={<GlobeIcon className="h-4 w-4" />} text={job.remote} />
+                        {job.experience && job.experience !== "Any" ? (
+                          <Meta icon={<CogIcon className="h-4 w-4" />} text={`${job.experience} thn`} />
+                        ) : null}
+                        {job.education && job.education !== "Any" ? (
+                          <Meta icon={<LayersIcon className="h-4 w-4" />} text={job.education} />
+                        ) : null}
+                        {(job.salaryMin != null || job.salaryMax != null) && (
+                          <Meta icon={<MoneyIcon className="h-4 w-4" />} text={formatSalary(job.salaryMin, job.salaryMax, job.currency)} />
+                        )}
+                      </div>
 
-                    <p className="mt-3 line-clamp-2 text-sm text-neutral-600">{job.description}</p>
+                      <p className="mt-3 line-clamp-2 text-sm text-neutral-600">{job.description}</p>
 
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="text-xs text-neutral-500">
-                        {t("common.posted", { date: formatPosted(job.posted) })}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSave(job.id);
-                        }}
-                        className={[
-                          "rounded-lg border px-2.5 py-1 text-xs transition",
-                          saved.includes(String(job.id))
-                            ? "border-amber-500 bg-amber-50 text-amber-700"
-                            : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
-                        ].join(" ")}
-                      >
-                        {saved.includes(String(job.id)) ? t("common.saved") : t("common.save")}
-                      </button>
+                      <div className="mt-3 flex items-center justify-between">
+                        <span className="text-xs text-neutral-500">
+                          {t("common.posted", { date: formatPosted(job.posted) })}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSave(job.id);
+                          }}
+                          className={[
+                            "rounded-lg border px-2.5 py-1 text-xs transition",
+                            saved.includes(String(job.id))
+                              ? "border-amber-500 bg-amber-50 text-amber-700"
+                              : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
+                          ].join(" ")}
+                        >
+                          {saved.includes(String(job.id)) ? t("common.saved") : t("common.save")}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </article>
-            ))
+                </article>
+              );
+            })
           )}
         </section>
       </div>
@@ -651,7 +727,6 @@ export default function JobsPage() {
               options={["", "On-site", "Remote", "Hybrid"]}
               icon={<GlobeIcon className="h-4 w-4" />}
             />
-            {/* NEW (mobile) */}
             <FilterSelect
               label={"Pengalaman"}
               value={filters.exp}
@@ -689,7 +764,7 @@ export default function JobsPage() {
         />
       )}
 
-      {/* Report Dialog (eksternal) */}
+      {/* Report Dialog */}
       <ReportDialog
         open={reportOpen}
         onClose={() => setReportOpen(false)}
@@ -767,7 +842,6 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
 function DetailModal({
   job, postedText, onClose, onApply, onReport,
 }: { job: Job; postedText: string; onClose: () => void; onApply: () => void; onReport: () => void; }) {
-
   return (
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={onClose} />
@@ -826,6 +900,7 @@ function DetailModal({
             >
               Tutup
             </button>
+            {/* Tombol selalu aktif — validasi login di applySelected */}
             <button
               onClick={onApply}
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"

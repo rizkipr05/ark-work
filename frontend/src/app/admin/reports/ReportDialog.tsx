@@ -32,7 +32,6 @@ export default function ReportDialog({
   const [catatan, setCatatan] = useState(defaultData?.catatan || "");
   const [loading, setLoading] = useState(false);
 
-  // Reset field saat modal dibuka
   useEffect(() => {
     if (open) {
       setJudul(defaultData?.judul || "");
@@ -53,27 +52,18 @@ export default function ReportDialog({
         credentials: "include",
         body: JSON.stringify({ judul, perusahaan, alasan, catatan }),
       });
-
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} @ ${url}\n${text}`);
+        throw new Error(text || "Gagal mengirim laporan");
       }
+      const created = await res.json();
 
-      const data = await res.json();
+      // 🔔 Beritahu halaman admin agar menambah data tanpa reload
+      window.dispatchEvent(new CustomEvent("ark:report-created", { detail: created }));
+      // juga ping lintas tab/route
+      try { localStorage.setItem("ark:report:ping", String(Date.now())); } catch {}
 
-      // 1) Callback parent (kalau modal dipasang di halaman yang sama)
-      onSubmitted?.(data);
-
-      // 2) Broadcast ke route/komponen lain dalam tab yang sama
-      try {
-        window.dispatchEvent(new CustomEvent("ark:report-created", { detail: data }));
-      } catch {}
-
-      // 3) Ping via localStorage untuk memicu 'storage' event di tab/route lain
-      try {
-        localStorage.setItem("ark:report:ping", String(Date.now()));
-      } catch {}
-
+      onSubmitted?.(created);
       onClose();
     } catch (err: any) {
       alert(err?.message || "Terjadi kesalahan");
@@ -89,41 +79,19 @@ export default function ReportDialog({
       <div className="w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h2 className="text-lg font-semibold">Laporkan Lowongan</h2>
-          <button
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100"
-            aria-label="Tutup"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100" aria-label="Tutup">✕</button>
         </div>
 
         <form onSubmit={submit} className="mt-4 space-y-4">
           <div className="grid gap-2 rounded-xl border p-3">
             <div className="text-sm text-gray-500">RINGKASAN LOWONGAN</div>
-            <input
-              required
-              value={judul}
-              onChange={(e) => setJudul(e.target.value)}
-              placeholder="Judul lowongan"
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            />
-            <input
-              required
-              value={perusahaan}
-              onChange={(e) => setPerusahaan(e.target.value)}
-              placeholder="Nama perusahaan"
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            />
+            <input required value={judul} onChange={(e) => setJudul(e.target.value)} placeholder="Judul lowongan" className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring" />
+            <input required value={perusahaan} onChange={(e) => setPerusahaan(e.target.value)} placeholder="Nama perusahaan" className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring" />
           </div>
 
           <div className="grid gap-2">
             <label className="text-sm font-medium">Alasan</label>
-            <select
-              value={alasan}
-              onChange={(e) => setAlasan(e.target.value)}
-              className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-            >
+            <select value={alasan} onChange={(e) => setAlasan(e.target.value)} className="w-full rounded-xl border px-3 py-2 focus:outline-none focus:ring">
               <option>Spam / Penipuan</option>
               <option>Konten Tidak Pantas</option>
               <option>Informasi Palsu</option>
@@ -134,24 +102,12 @@ export default function ReportDialog({
 
           <div className="grid gap-2">
             <label className="text-sm font-medium">Catatan (opsional)</label>
-            <textarea
-              value={catatan}
-              onChange={(e) => setCatatan(e.target.value)}
-              rows={4}
-              className="w-full resize-y rounded-xl border px-3 py-2 focus:outline-none focus:ring"
-              placeholder="Tambahkan detail…"
-            />
+            <textarea value={catatan} onChange={(e) => setCatatan(e.target.value)} rows={4} className="w-full resize-y rounded-xl border px-3 py-2 focus:outline-none focus:ring" placeholder="Tambahkan detail…" />
           </div>
 
           <div className="mt-2 flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2 hover:bg-gray-50">
-              Batal
-            </button>
-            <button
-              disabled={loading}
-              type="submit"
-              className="rounded-xl bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-60"
-            >
+            <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2 hover:bg-gray-50">Batal</button>
+            <button disabled={loading} type="submit" className="rounded-xl bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-60">
               {loading ? "Mengirim..." : "Kirim Laporan"}
             </button>
           </div>

@@ -18,8 +18,11 @@ import paymentsRouter from './routes/payments';
 import tendersRouter from './routes/tenders';
 import adminTendersRouter from './routes/admin-tenders';
 import { jobsRouter } from './routes/jobs';
-import reportsRouter from './routes/reports'; // <-- Reports router
+import reportsRouter from './routes/reports';
 import ratesRouter from './routes/rates';
+
+/** 👉 NEW: router lamaran (buat file routes/applications.ts) */
+import applicationsRouter from './routes/applications';
 
 /* --------------------------- Role guards (opt) --------------------------- */
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -28,7 +31,7 @@ const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const DEFAULT_PORT = Number(process.env.PORT || 4000);
 
-/* ------------------------------- CORS ---------------------------------- */
+/* -------------------------------- CORS ---------------------------------- */
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
 
 const defaultAllowed = [
@@ -37,7 +40,7 @@ const defaultAllowed = [
   'http://localhost:3001',
   'http://127.0.0.1:3001',
   'http://localhost:5173',
-  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5173'
 ];
 
 const envAllowed = FRONTEND_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
@@ -73,7 +76,7 @@ const corsOptions: cors.CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id']
 };
 
 app.use(cors(corsOptions));
@@ -86,7 +89,7 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 
-/* ------------------ Middleware: BigInt -> string for res.json ------------ */
+/* --------- Middleware: konversi BigInt -> string untuk res.json ---------- */
 app.use((_req, res, next) => {
   function convertBigInt(obj: any): any {
     if (obj === null || obj === undefined) return obj;
@@ -99,7 +102,6 @@ app.use((_req, res, next) => {
     }
     return obj;
   }
-
   const oldJson = res.json.bind(res);
   res.json = (body?: any) => oldJson(convertBigInt(body));
   next();
@@ -110,7 +112,6 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   console.log(`${req.method} ${req.originalUrl}`);
   next();
 });
-
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
 /* ------------------------------ Health ---------------------------------- */
@@ -126,7 +127,7 @@ app.use('/auth', authRouter);
 app.use('/admin', adminRouter);
 
 // Laporan
-app.use('/api/reports', reportsRouter); // <-- reports integrated
+app.use('/api/reports', reportsRouter);
 
 // News & Chat
 app.use('/api/news', newsRouter);
@@ -144,28 +145,26 @@ app.use('/admin/tenders', adminTendersRouter);
 // Employer auth (signup/signin/signout/me)
 app.use('/api/employers/auth', employerAuthRouter);
 
-// Employer features (step1–5, profile, etc.)
+// Employer features (step1–5, profile, dll)
 app.use('/api/employers', employerRouter);
 
 // Admin plans & payments
 app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
 
-// Jobs API
+// Jobs API (existing)
 app.use('/api', jobsRouter);
 
-app.use('/api/reports', reportsRouter);
-
+/** 👉 NEW: Applications API (DB, no localStorage) */
+app.use('/api/applications', applicationsRouter);
 
 /* ------------------------- Protected examples ---------------------------- */
 app.get('/api/profile', authRequired, (req, res) => {
   res.json({ ok: true, whoami: (req as any).auth });
 });
-
 app.get('/api/employer/dashboard', employerRequired, (req, res) => {
   res.json({ ok: true, message: 'Employer-only area', whoami: (req as any).auth });
 });
-
 app.post('/api/admin/stats', adminRequired, (req, res) => {
   res.json({ ok: true, message: 'Admin-only area', whoami: (req as any).auth });
 });

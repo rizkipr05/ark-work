@@ -1,20 +1,33 @@
-import { Router } from 'express';
-import { prisma } from '../utils/prisma';
+import { Router } from "express";
+import prisma from "../utils/prisma";
+import { Prisma } from "@prisma/client";
 
 export const jobsRouter = Router();
+
+// Type helper untuk include employer + profile.logoUrl
+type JobWithEmployer = Prisma.JobGetPayload<{
+  include: {
+    employer: {
+      select: {
+        displayName: true;
+        profile: { select: { logoUrl: true } };
+      };
+    };
+  };
+}>;
 
 /**
  * GET /api/jobs
  * Query:
- *  - active=1 (opsional) -> hanya job aktif (isActive true & isDraft false)
+ *  - active=1 => hanya job aktif (isActive true & isDraft false)
  */
-jobsRouter.get('/jobs', async (req, res) => {
+jobsRouter.get("/jobs", async (req, res) => {
   try {
-    const onlyActive = String(req.query.active || '') === '1';
+    const onlyActive = String(req.query.active ?? "") === "1";
 
     const jobs = await prisma.job.findMany({
       where: onlyActive ? { isActive: true, isDraft: false } : undefined,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
         employer: {
           select: {
@@ -25,43 +38,40 @@ jobsRouter.get('/jobs', async (req, res) => {
       },
     });
 
-    const data = jobs.map((j) => ({
+    const data = (jobs as JobWithEmployer[]).map((j) => ({
       id: j.id,
       title: j.title,
-      location: j.location ?? '',
-      employment: j.employment ?? '',
-      description: j.description ?? '',
+      location: j.location ?? "",
+      employment: j.employment ?? "",
+      description: j.description ?? "",
       postedAt: j.createdAt.toISOString(),
-      company: j.employer?.displayName ?? 'Company',
+      company: j.employer?.displayName ?? "Company",
       logoUrl: j.employer?.profile?.logoUrl ?? null,
       isActive: j.isActive,
     }));
 
-    res.json({ ok: true, data });
+    return res.json({ ok: true, data });
   } catch (e: any) {
-    console.error('GET /api/jobs error:', e);
-    res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
+    console.error("GET /api/jobs error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
   }
 });
 
 /**
- * (Opsional) GET /api/employer/jobs
- * Ambil job milik employer tertentu (dev: boleh lewat query ?employerId=... / env)
+ * GET /api/employer/jobs
+ * Query: ?employerId=<UUID>
  */
-jobsRouter.get('/employer/jobs', async (req, res) => {
+jobsRouter.get("/employer/jobs", async (req, res) => {
   try {
-    const employerId =
-      (req.query.employerId as string) || process.env.DEV_EMPLOYER_ID;
+    const employerId = (req.query.employerId as string) || process.env.DEV_EMPLOYER_ID;
 
     if (!employerId) {
-      return res
-        .status(401)
-        .json({ ok: false, error: 'employerId tidak tersedia' });
+      return res.status(401).json({ ok: false, error: "employerId tidak tersedia" });
     }
 
     const jobs = await prisma.job.findMany({
       where: { employerId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
         employer: {
           select: {
@@ -72,32 +82,31 @@ jobsRouter.get('/employer/jobs', async (req, res) => {
       },
     });
 
-    const data = jobs.map((j) => ({
+    const data = (jobs as JobWithEmployer[]).map((j) => ({
       id: j.id,
       title: j.title,
-      location: j.location ?? '',
-      employment: j.employment ?? '',
-      description: j.description ?? '',
+      location: j.location ?? "",
+      employment: j.employment ?? "",
+      description: j.description ?? "",
       postedAt: j.createdAt.toISOString(),
-      company: j.employer?.displayName ?? 'Company',
+      company: j.employer?.displayName ?? "Company",
       logoUrl: j.employer?.profile?.logoUrl ?? null,
       isActive: j.isActive,
       isDraft: j.isDraft,
     }));
 
-    res.json({ ok: true, data });
+    return res.json({ ok: true, data });
   } catch (e: any) {
-    console.error('GET /api/employer/jobs error:', e);
-    res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
+    console.error("GET /api/employer/jobs error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
   }
 });
 
 /**
  * POST /api/employer/jobs
  * Body: { title, location?, employment?, description?, isDraft?, employerId?, logoDataUrl? }
- * Ambil employerId dari session (TODO). DEV: pakai body.employerId atau ENV DEV_EMPLOYER_ID.
  */
-jobsRouter.post('/employer/jobs', async (req, res) => {
+jobsRouter.post("/employer/jobs", async (req, res) => {
   try {
     const {
       title,
@@ -109,23 +118,18 @@ jobsRouter.post('/employer/jobs', async (req, res) => {
       logoDataUrl,
     } = req.body || {};
 
-    if (!title || typeof title !== 'string') {
-      return res.status(400).json({ ok: false, error: 'title wajib diisi' });
+    if (!title || typeof title !== "string") {
+      return res.status(400).json({ ok: false, error: "title wajib diisi" });
     }
 
-    // TODO: pakai session di produksi
+    // NOTE produksi: ambil dari session auth
     const employerId = bodyEmployerId || process.env.DEV_EMPLOYER_ID;
     if (!employerId) {
-      return res
-        .status(401)
-        .json({
-          ok: false,
-          error: 'Tidak ada employerId (login sebagai employer dulu)',
-        });
+      return res.status(401).json({ ok: false, error: "Tidak ada employerId (login dulu)" });
     }
 
-    // Jika ada logo (data URL) dikirim, simpan ke profil employer
-    if (logoDataUrl && typeof logoDataUrl === 'string') {
+    // (opsional) update logo di profil employer dari base64 data URL
+    if (logoDataUrl && typeof logoDataUrl === "string") {
       await prisma.employer.update({
         where: { id: employerId },
         data: {
@@ -152,7 +156,7 @@ jobsRouter.post('/employer/jobs', async (req, res) => {
         location: location ?? null,
         employment: employment ?? null,
         isDraft: Boolean(isDraft),
-        isActive: !Boolean(isDraft), // jika bukan draft -> aktif
+        isActive: !Boolean(isDraft), // bukan draft => aktif
       },
     });
 
@@ -165,15 +169,13 @@ jobsRouter.post('/employer/jobs', async (req, res) => {
         employment: job.employment,
         description: job.description,
         postedAt: job.createdAt.toISOString(),
-        company: employer?.displayName ?? 'Company',
+        company: employer?.displayName ?? "Company",
         logoUrl: employer?.profile?.logoUrl ?? null,
         isActive: job.isActive,
       },
     });
   } catch (e: any) {
-    console.error('POST /api/employer/jobs error:', e);
-    return res
-      .status(500)
-      .json({ ok: false, error: e?.message || 'Internal error' });
+    console.error("POST /api/employer/jobs error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
   }
 });

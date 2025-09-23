@@ -3,12 +3,55 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useAuth } from '@/hooks/useAuth';
+import { SignedIn, SignedOut, RedirectToSignIn, useUser } from '@clerk/nextjs';
+import { useAuth as useLocalAuth } from '@/hooks/useAuth';
 
-export default function AdminSidebar() {
+/* ============================ Page ============================ */
+
+export default function AdminPage() {
+  const { user } = useUser();
+  // Role dari Clerk publicMetadata (default "user")
+  const role = ((user?.publicMetadata as any)?.role as string) || 'user';
+
+  return (
+    <>
+      <SignedIn>
+        {role === 'admin' ? (
+          <div className="min-h-screen bg-neutral-50 md:pl-72">
+            <AdminSidebar />
+            <main className="p-6">
+              <h1 className="text-xl font-semibold">Admin Panel</h1>
+              <p className="text-gray-600 mt-2">
+                Selamat datang, {user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress}
+              </p>
+            </main>
+          </div>
+        ) : (
+          <div className="min-h-screen bg-neutral-50 md:pl-72">
+            <AdminSidebar />
+            <main className="p-6">
+              <h1 className="text-xl font-semibold text-rose-600">Akses ditolak</h1>
+              <p className="text-gray-600 mt-2">Halaman ini khusus admin.</p>
+            </main>
+          </div>
+        )}
+      </SignedIn>
+
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </>
+  );
+}
+
+/* ========================= Sidebar ========================= */
+
+function AdminSidebar() {
   const currentPath = usePathname() ?? '';
   const router = useRouter();
-  const { signout, user } = useAuth();
+
+  // kalau mau pakai Clerk signOut langsung, ganti ke useClerk().signOut
+  const { signout, user } = useLocalAuth();
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -19,11 +62,15 @@ export default function AdminSidebar() {
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = open ? 'hidden' : prev || '';
-    return () => { document.body.style.overflow = prev || ''; };
+    return () => {
+      document.body.style.overflow = prev || '';
+    };
   }, [open]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -44,23 +91,32 @@ export default function AdminSidebar() {
     }
   }, [router, signout]);
 
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  // Tambah item "Reports" ke sidebar (path: /admin/reports)
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  const menu = useMemo(() => ([
-    { name: 'Dashboard', path: '/admin', icon: HomeIcon },
-    { name: 'Reports', path: '/admin/reports', icon: FlagIcon },
-    { name: 'Tenders Management', path: '/admin/tenders', icon: LayersIcon },
-    { name: 'User Management', path: '/admin/users', icon: UsersIcon },
-    { name: 'Monetisasi (Plans)', path: '/admin/monet', icon: MoneyIcon },
-    { name: 'Payments (Midtrans)', path: '/admin/payments', icon: CreditCardIcon },
-  ]), []);
-  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  // Tambah "Employer Jobs" yang menuju /admin/employers/jobs
+  const menu = useMemo(
+    () => [
+      { name: 'Dashboard', path: '/admin', icon: HomeIcon },
+      { name: 'Reports', path: '/admin/reports', icon: FlagIcon },
+      { name: 'Employer Jobs', path: '/admin/employers/jobs', icon: BriefcaseIcon },
+      { name: 'Tenders Management', path: '/admin/tenders', icon: LayersIcon },
+      { name: 'User Management', path: '/admin/users', icon: UsersIcon },
+      { name: 'Monetisasi (Plans)', path: '/admin/monet', icon: MoneyIcon },
+      { name: 'Payments (Midtrans)', path: '/admin/payments', icon: CreditCardIcon },
+    ],
+    []
+  );
 
   const isActive = (path: string) =>
     path === '/admin' ? currentPath === path : currentPath === path || currentPath.startsWith(path + '/');
 
-  function Item({ name, path, Icon }: { name: string; path: string; Icon: (p: React.SVGProps<SVGSVGElement>) => JSX.Element }) {
+  function Item({
+    name,
+    path,
+    Icon,
+  }: {
+    name: string;
+    path: string;
+    Icon: (p: React.SVGProps<SVGSVGElement>) => JSX.Element;
+  }) {
     const active = isActive(path);
     return (
       <li>
@@ -70,9 +126,7 @@ export default function AdminSidebar() {
           className={[
             'group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition',
             'ring-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
-            active
-              ? 'bg-white/10 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]'
-              : 'text-white/85 hover:bg-white/8 hover:text-white',
+            active ? 'bg-white/10 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)]' : 'text-white/85 hover:bg-white/8 hover:text-white',
           ].join(' ')}
         >
           <span
@@ -100,7 +154,7 @@ export default function AdminSidebar() {
     >
       <div className="flex h-16 items-center px-3 border-b border-white/10/50">
         <button
-          onClick={() => setCollapsed(v => !v)}
+          onClick={() => setCollapsed((v) => !v)}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 hover:bg-white/5 active:scale-95 transition"
         >
@@ -115,10 +169,12 @@ export default function AdminSidebar() {
       </div>
 
       <nav className="mt-2 flex-1 overflow-y-auto px-2">
-        <p className={[
-          'px-3 text-[10px] uppercase tracking-wider text-white/50 mb-2',
-          collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100',
-        ].join(' ')}>
+        <p
+          className={[
+            'px-3 text-[10px] uppercase tracking-wider text-white/50 mb-2',
+            collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100',
+          ].join(' ')}
+        >
           Main
         </p>
         <ul className="space-y-1" role="list">
@@ -198,13 +254,7 @@ export default function AdminSidebar() {
       </div>
 
       {/* Overlay */}
-      {open && (
-        <div
-          onClick={handleCloseMenu}
-          className="fixed inset-0 z-50 md:hidden bg-black/40"
-          aria-hidden="true"
-        />
-      )}
+      {open && <div onClick={handleCloseMenu} className="fixed inset-0 z-50 md:hidden bg-black/40" aria-hidden="true" />}
 
       {/* Mobile Drawer */}
       <aside
@@ -262,7 +312,10 @@ export default function AdminSidebar() {
               {/* Logout mobile */}
               <li>
                 <button
-                  onClick={async () => { await handleLogout(); setOpen(false); }}
+                  onClick={async () => {
+                    await handleLogout();
+                    setOpen(false);
+                  }}
                   disabled={busy}
                   className="group relative w-full flex items-center gap-3 rounded-xl px-3 py-3 text-[15px] transition text-left text-red-100 hover:bg-red-500/10 hover:text-white disabled:opacity-60"
                 >
@@ -287,53 +340,95 @@ export default function AdminSidebar() {
 
 /* ----------------------------- Icons ----------------------------- */
 function BurgerIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 function CloseIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 function SparkIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 2l2.2 5.4L20 9l-5 3.8L16 20l-4-3-4 3 1-7.2L4 9l5.8-1.6L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M12 2l2.2 5.4L20 9l-5 3.8L16 20l-4-3-4 3 1-7.2L4 9l5.8-1.6L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
 }
 function HomeIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
 }
 function LayersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><path d="M12 3l8 4-8 4-8-4 8-4Z" stroke="currentColor" strokeWidth="2"/><path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2"/><path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M12 3l8 4-8 4-8-4 8-4Z" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+      <path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
 }
 function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return <svg viewBox="0 0 24 24" fill="none" {...props}><circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="2"/><circle cx="16" cy="11" r="3" stroke="currentColor" strokeWidth="2"/><path d="M3 20a5 5 0 0 1 7-4.6M14 20a5 5 0 0 1 5-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="2" />
+      <circle cx="16" cy="11" r="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M3 20a5 5 0 0 1 7-4.6M14 20a5 5 0 0 1 5-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 function LogoutIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-      <path d="M10 12h10M17 9l3 3-3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M10 12h10M17 9l3 3-3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 function MoneyIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2"/>
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+      <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }
 function CreditCardIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="2"/>
-      <path d="M2 10h20" stroke="currentColor" strokeWidth="2"/>
-      <rect x="6" y="14" width="6" height="2" rx="1" stroke="currentColor" strokeWidth="2"/>
+      <rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M2 10h20" stroke="currentColor" strokeWidth="2" />
+      <rect x="6" y="14" width="6" height="2" rx="1" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }
-// Ikon baru untuk menu Reports
 function FlagIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M5 21V5m0 0h9l-1.5 3H19l-1.5 3H14l-1.5 3H5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path
+        d="M5 21V5m0 0h9l-1.5 3H19l-1.5 3H14l-1.5 3H5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2" />
+      <path d="M3 12h18" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }

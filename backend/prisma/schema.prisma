@@ -18,6 +18,10 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @default(now()) @updatedAt
   sessions     Session[]
+
+  /// Relasi lamaran & bookmark
+  applications JobApplication[]
+  savedJobs    SavedJob[]
 }
 
 model Admin {
@@ -243,6 +247,9 @@ model Job {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   employer    Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
 
+  applications JobApplication[]
+  savedBy      SavedJob[]
+
   @@index([employerId, isActive])
   @@map("jobs")
 }
@@ -316,6 +323,47 @@ model Report {
   dibuatPada DateTime @default(now())
 
   @@index([status])
+}
+
+/// ===================== JOB APPLICATIONS & SAVED JOBS =====================
+enum ApplicationStatus {
+  submitted
+  review
+  shortlist
+  rejected
+  hired
+}
+
+model JobApplication {
+  id          String            @id @default(cuid())
+  jobId       String            @db.Uuid
+  applicantId String
+  status      ApplicationStatus @default(submitted)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+
+  job       Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  applicant User @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, applicantId])
+  @@index([applicantId])
+  @@index([jobId])
+  @@map("job_applications")
+}
+
+model SavedJob {
+  id        String   @id @default(cuid())
+  jobId     String   @db.Uuid
+  userId    String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, userId])
+  @@index([userId])
+  @@index([jobId])
+  @@map("saved_jobs")
 }
 
 /// ===================== Tender Enums =====================

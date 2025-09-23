@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 
@@ -11,10 +11,7 @@ const API_BASE =
   (process.env.NODE_ENV === "development" ? "http://localhost:4000" : "");
 
 /* -------- Report Dialog (dynamic supaya bukan RSC) -------- */
-const ReportDialog = dynamic(
-  () => import("@/app/admin/reports/ReportDialog"),
-  { ssr: false }
-);
+const ReportDialog = dynamic(() => import("@/app/admin/reports/ReportDialog"), { ssr: false });
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -209,7 +206,7 @@ export default function JobsPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportDefaults, setReportDefaults] = useState<{ judul?: string; perusahaan?: string; alasan?: string; catatan?: string; }>({});
 
-  // Sinkronkan ark_current dari backend (cookie session user)
+  // simpan user id dari backend ke localStorage agar badge "sudah dilamar" sinkron
   useEffect(() => {
     (async () => {
       const userIdFromCookie = await getCurrentUserId();
@@ -224,7 +221,7 @@ export default function JobsPage() {
     })();
   }, []);
 
-  const refreshAppliedForCurrent = () => {
+  const refreshAppliedForCurrent = useCallback(() => {
     try {
       const cur = localStorage.getItem("ark_current");
       if (!cur) return setApplied([]);
@@ -234,79 +231,85 @@ export default function JobsPage() {
     } catch {
       setApplied([]);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    const ac = new AbortController(); let alive = true;
-
-    (async () => {
-      try {
-        setLoadErr(null);
-        const base = (API_BASE || "").replace(/\/+$/, "");
-        if (!base) {
-          setLoadErr("API base tidak terkonfigurasi");
-          setJobs([]);
-          return;
-        }
-        const opts: RequestInit = { credentials: "include", signal: ac.signal };
-
-        // 1) Semua job aktif (dari DB)
-        const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
-        if (!alive) return;
-
-        if (r1.ok) {
-          const j1 = await r1.json().catch(() => null);
-          const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
-          const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
-          setJobs(mapped);
-          return;
-        }
-
-        // 2) Fallback: job milik employer login (opsional)
-        const eid = localStorage.getItem("ark_employer_id");
-        if (eid) {
-          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
-          if (!alive) return;
-
-          if (r2.ok) {
-            const j2 = await r2.json().catch(() => null);
-            const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
-            const mapped2 = normalizeServer(serverList2).sort((a, b) => sortByPosted(a, b, sort === "newest"));
-            setJobs(mapped2);
-            return;
-          }
-        }
-
+  // loader dipisah supaya bisa dipanggil ulang saat "ark:jobs-updated"
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setLoadErr(null);
+      const base = (API_BASE || "").replace(/\/+$/, "");
+      if (!base) {
+        setLoadErr("API base tidak terkonfigurasi");
         setJobs([]);
-        setLoadErr(`Gagal memuat dari server (HTTP ${r1.status}).`);
-      } catch (e: any) {
-        if (!ac.signal.aborted) {
-          console.error("[JobsPage] load error:", e);
-          setLoadErr(e?.message || "Gagal memuat data");
-          setJobs([]);
+        return;
+      }
+      const opts: RequestInit = { credentials: "include", signal };
+
+      // 1) Semua job aktif (dari DB)
+      const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
+      if (signal?.aborted) return;
+
+      if (r1.ok) {
+        const j1 = await r1.json().catch(() => null);
+        const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
+        const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
+        setJobs(mapped);
+        return;
+      }
+
+      // 2) Fallback: job milik employer login (opsional)
+      const eid = localStorage.getItem("ark_employer_id");
+      if (eid) {
+        const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
+        if (signal?.aborted) return;
+
+        if (r2.ok) {
+          const j2 = await r2.json().catch(() => null);
+          const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
+          const mapped2 = normalizeServer(serverList2).sort((a, b) => sortByPosted(a, b, sort === "newest"));
+          setJobs(mapped2);
+          return;
         }
       }
-    })();
 
+      setJobs([]);
+      setLoadErr(`Gagal memuat dari server (HTTP ${r1.status}).`);
+    } catch (e: any) {
+      if (!signal?.aborted) {
+        console.error("[JobsPage] load error:", e);
+        setLoadErr(e?.message || "Gagal memuat data");
+        setJobs([]);
+      }
+    }
+  }, [sort]);
+
+  // pertama kali & saat sort berubah
+  useEffect(() => {
+    const ac = new AbortController();
+    load(ac.signal);
     try {
       setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
     } catch {}
-
     refreshAppliedForCurrent();
 
-    const onUpd = () => {
+    const onStorage = () => {
       refreshAppliedForCurrent();
       try {
         setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
       } catch {}
     };
-    window.addEventListener("storage", onUpd);
+    window.addEventListener("storage", onStorage);
+
+    // listen event dari halaman admin (hapus/nonaktif job)
+    const onJobsUpdated = () => load(ac.signal);
+    window.addEventListener("ark:jobs-updated", onJobsUpdated);
 
     return () => {
       ac.abort();
-      window.removeEventListener("storage", onUpd);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("ark:jobs-updated", onJobsUpdated);
     };
-  }, [sort]);
+  }, [load, refreshAppliedForCurrent]);
 
   const dateFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "2-digit" }),
@@ -356,7 +359,6 @@ export default function JobsPage() {
   async function applySelected(sel: Job | null) {
     if (!sel) return;
 
-    // pastikan tau user siapa dari cookie session
     let cur = localStorage.getItem("ark_current");
     if (!cur) {
       cur = await getCurrentUserId();
@@ -369,7 +371,6 @@ export default function JobsPage() {
       return;
     }
 
-    // local cache untuk badge “Sudah dilamar”
     let apps: Record<string, { jobId: string; date: string }[]> = {};
     try {
       apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
@@ -391,7 +392,6 @@ export default function JobsPage() {
 
     if (base) {
       try {
-        // NOTE: hanya kirim jobId — userId diambil dari cookie (authRequired)
         const res = await fetch(`${base}/api/applications`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -405,7 +405,6 @@ export default function JobsPage() {
       }
     }
 
-    // update cache lokal agar badge langsung berubah
     const next = [...userArr, { jobId, date: new Date().toISOString().slice(0, 10) }];
     apps[cur] = next;
     localStorage.setItem("ark_apps", JSON.stringify(apps));

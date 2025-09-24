@@ -1,3 +1,4 @@
+// src/app/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -8,7 +9,6 @@ import {useLocale, useTranslations} from 'next-intl';
 
 /** ================== Types ================== */
 type SimpleUser = { email?: string | null; name?: string | null } | null;
-type RecentItem = { jobId: string | number; title: string; date: string };
 type StoredUser = {
   email: string;
   name?: string;
@@ -25,7 +25,8 @@ type StoredUser = {
 
 /** ================== Constants / Keys ================== */
 const LS_USERS_KEY = 'ark_users';
-const NAV_NAME_KEY_PREFIX = 'ark_nav_name:'; // kalau mau ambil nama dari navbar
+const NAV_NAME_KEY_PREFIX = 'ark_nav_name:';
+const LS_CV_DRAFTS = 'ark_cv_drafts'; // { [email]: CvDraft }
 
 /** ================== Minimal Icons ================== */
 function ArrowRightIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -42,19 +43,19 @@ function UserIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-function ClockIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/>
-      <path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  );
-}
 function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" {...props}>
       <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/>
       <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2"/>
+    </svg>
+  );
+}
+function DocumentIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M7 3h6l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="2"/>
+      <path d="M13 3v4h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -64,7 +65,7 @@ function LineSkeleton({w='100%'}:{w?:string}) {
   return <div className="h-3 rounded bg-neutral-200" style={{width: w}}/>;
 }
 
-/** ================== IndexedDB utils (read-only CV) ================== */
+/** ================== IndexedDB utils (read-only CV check, optional) ================== */
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open('ark_db', 2);
@@ -101,14 +102,13 @@ export default function Dashboard() {
   const t = useTranslations('dashboard');
   const locale = useLocale();
 
-  const [recent, setRecent] = useState<RecentItem[]>([]);
-
   // --- Profil Stats State ---
   const [displayName, setDisplayName] = useState<string>('');
-  const [hasCv, setHasCv] = useState<boolean>(false);
+  const [hasCv, setHasCv] = useState<boolean>(false);           // cek file CV (opsional)
+  const [hasCvDraft, setHasCvDraft] = useState<boolean>(false); // cek draft di /cv
   const [skillsCount, setSkillsCount] = useState<number>(0);
   const [profileFilled, setProfileFilled] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0); // 0..100, animated
+  const [progress, setProgress] = useState<number>(0);
 
   const dateFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit' }),
@@ -128,71 +128,40 @@ export default function Dashboard() {
     const users = readUsersSafe();
     const u = users.find(x => x.email === email);
 
-    // Nama: ambil prioritas dari NAV_NAME agar konsisten dengan navbar
     const navName = localStorage.getItem(NAV_NAME_KEY_PREFIX + email) ?? '';
     const nameFinal = (navName || u?.name || '').trim();
     setDisplayName(nameFinal || t('fallback.there'));
 
-    // Skills
     const skillsCsv = u?.profile?.skills ?? '';
     const skillsArr = skillsCsv.split(',').map(s => s.trim()).filter(Boolean);
     setSkillsCount(skillsArr.length);
 
-    // Profil minimal terisi (contoh: name + location + phone)
     const filled = Boolean(nameFinal) && Boolean(u?.profile?.location) && Boolean(u?.profile?.phone);
     setProfileFilled(filled);
 
-    // CV
-    const metaKey = u?.profile?.cv?.key; // expected 'cv:email'
+    // Cek CV lama (IndexedDB) — optional
+    const metaKey = u?.profile?.cv?.key;
     let cvOk = false;
-    if (metaKey) {
-      cvOk = await idbHas('cv_files', metaKey);
-    }
+    if (metaKey) cvOk = await idbHas('cv_files', metaKey);
     setHasCv(cvOk);
 
-    // Progress (contoh bobot sederhana)
-    // name/location/phone = 3 poin, cv = 1 poin, skills >=3 = 1 poin (maks 5 -> 100%)
+    // Cek draft CV builder (/cv)
+    try {
+      const allDrafts = JSON.parse(localStorage.getItem(LS_CV_DRAFTS) ?? '{}');
+      setHasCvDraft(Boolean(allDrafts?.[email]));
+    } catch {
+      setHasCvDraft(false);
+    }
+
+    // Skor kelengkapan sederhana
     let score = 0;
     score += (nameFinal ? 1 : 0);
     score += (u?.profile?.location ? 1 : 0);
     score += (u?.profile?.phone ? 1 : 0);
-    score += (cvOk ? 1 : 0);
+    score += (cvOk || hasCvDraft ? 1 : 0);
     score += (skillsArr.length >= 3 ? 1 : 0);
     const pct = Math.round((score / 5) * 100);
-
-    // animasi halus
-    setProgress(p => {
-      // animate towards pct
-      if (p === pct) return p;
-      return pct;
-    });
-  }
-
-  function refreshRecent(email: string) {
-    try {
-      const appsRaw = localStorage.getItem('ark_apps');
-      const jobsRaw = localStorage.getItem('ark_jobs');
-
-      const apps = JSON.parse(appsRaw ?? '{}');
-      const jobs: any[] = JSON.parse(jobsRaw ?? '[]');
-
-      const userKey = email ?? '';
-      const arr: RecentItem[] = (apps[userKey] ?? [])
-        .slice(-3)
-        .map((a: any) => {
-          const j = jobs.find((jj) => jj.id === a.jobId);
-          return {
-            jobId: a.jobId,
-            title: j?.title ?? `${t('fallback.job')} ${a.jobId}`,
-            date: a.date ?? new Date().toISOString()
-          };
-        });
-
-      setRecent(arr.reverse());
-    } catch (e) {
-      console.error('Failed to parse localStorage:', e);
-      setRecent([]);
-    }
+    setProgress(pct);
   }
 
   // -------- effects --------
@@ -205,25 +174,12 @@ export default function Dashboard() {
     }
 
     refreshProfileStats(user.email);
-    refreshRecent(user.email);
 
-    // Realtime: bila ProfilePage mem-broadcast
-    const onProfileUpdated = () => {
-      if (user?.email) {
-        refreshProfileStats(user.email);
-        refreshRecent(user.email);
-      }
-    };
+    // Update realtime kalau data profile/draft berubah
+    const onProfileUpdated = () => user?.email && refreshProfileStats(user.email);
     window.addEventListener('ark:profile-updated', onProfileUpdated);
-    window.addEventListener('ark:avatar-updated', onProfileUpdated); // optional, kalau mau re-render stats juga
-
-    // Storage listener (perubahan dari tab lain)
-    const onStorage = (e: StorageEvent) => {
-      if (!user?.email) return;
-      if (e.key?.startsWith(LS_USERS_KEY) || e.key === (NAV_NAME_KEY_PREFIX + user.email) || e.key === 'ark_apps') {
-        onProfileUpdated();
-      }
-    };
+    window.addEventListener('ark:avatar-updated', onProfileUpdated);
+    const onStorage = () => user?.email && refreshProfileStats(user.email);
     window.addEventListener('storage', onStorage);
 
     return () => {
@@ -287,7 +243,7 @@ export default function Dashboard() {
                   {t('greeting', {name: displayName || t('fallback.there')})}
                 </h1>
                 <p className="mt-2 max-w-xl text-sm text-neutral-300">
-                  {t('hero.subtitle') || 'Pantau profil dan lamaran terakhirmu di satu tempat.'}
+                  {t('hero.subtitle') || 'Pantau profil dan kelola CV kamu di satu tempat.'}
                 </p>
               </div>
 
@@ -314,7 +270,7 @@ export default function Dashboard() {
         {/* Content grid */}
         <section className="mt-8 grid gap-6 md:grid-cols-2">
 
-          {/* Profile card (TERHUBUNG DGN ProfilePage) */}
+          {/* Profile card */}
           <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-neutral-900">
@@ -362,72 +318,44 @@ export default function Dashboard() {
                   {profileFilled ? '✔︎' : 'Lengkapi'}
                 </p>
               </div>
-              <div className="rounded-xl border border-neutral-200 p-3">
-                <p className="text-xs text-neutral-500">{t('profile.stats.cv')}</p>
-                <p className={`mt-1 text-lg font-semibold ${hasCv ? 'text-green-600' : 'text-amber-600'}`}>
-                  {hasCv ? 'Ada' : 'Belum'}
-                </p>
-              </div>
-              <div className="rounded-xl border border-neutral-200 p-3">
+              <div className="rounded-2xl border border-neutral-200 p-3">
                 <p className="text-xs text-neutral-500">{t('profile.stats.skills')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">{skillsCount}</p>
               </div>
             </div>
           </div>
 
-          {/* Recent activity (tetap) */}
+          {/* === Panel Buat CV (ATS) === */}
           <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-neutral-900">{t('recent.title')}</h3>
-              <ClockIcon className="h-5 w-5 text-neutral-400" />
+              <h3 className="text-lg font-semibold text-neutral-900">Buat CV (ATS)</h3>
+              <DocumentIcon className="h-5 w-5 text-neutral-400" />
             </div>
 
-            <div className="space-y-3">
-              {recent.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-neutral-200 p-5 text-center">
-                  <p className="text-sm text-neutral-600">{t('recent.empty')}</p>
-                  <Link
-                    href="/jobs"
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800"
-                  >
-                    <BriefcaseIcon className="h-4 w-4" />
-                    {t('cta.findJobs') || 'Cari Lowongan'}
-                  </Link>
-                </div>
-              ) : (
-                recent.map((r, i) => {
-                  const d = new Date(r.date);
-                  const when = isNaN(d.getTime()) ? r.date : dateFmt.format(d);
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-start justify-between gap-3 rounded-xl border border-neutral-200 p-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-neutral-900">{r.title}</p>
-                        <p className="mt-0.5 text-xs text-neutral-500">{when}</p>
-                      </div>
-                      <Link
-                        href={`/jobs/${r.jobId}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
-                      >
-                        {t('recent.view')} <ArrowRightIcon className="h-3.5 w-3.5" />
-                      </Link>
-                    </div>
-                  );
-                })
-              )}
+            <p className="text-sm text-neutral-600">
+              Susun CV format ATS yang rapi dan siap kirim. Kamu bisa lanjutkan dari draft yang tersimpan otomatis.
+            </p>
+
+            {/* Status draft */}
+            <div className="mt-4 flex items-center gap-2 text-sm">
+              <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-neutral-700">
+                {hasCvDraft ? 'Draft ditemukan' : 'Belum ada draft'}
+              </span>
             </div>
 
-            <div className="mt-5">
+            {/* CTA ke /cv */}
+            <div className="mt-5 flex flex-wrap items-center gap-3">
               <Link
-                href="/applications"
-                className="group inline-flex items-center gap-2 rounded-xl bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-800 transition hover:bg-neutral-200"
+                href="/cv"
+                className="group inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
               >
-                {t('recent.viewAll')}
+                {hasCvDraft ? 'Lanjutkan Draft' : 'Buat CV Sekarang'}
                 <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-0.5" />
               </Link>
+
+              
             </div>
+
           </div>
         </section>
 

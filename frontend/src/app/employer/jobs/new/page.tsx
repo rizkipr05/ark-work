@@ -1,192 +1,222 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-/* ---------------- Env (dukung 2 var + fallback) ---------------- */
+/* ---------------- Env ---------------- */
 const API =
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:4000";
+  'http://localhost:4000';
 
-/* ---------------- Local types & const ---------------- */
-type LocalJob = {
-  id: number | string;
-  title: string;
-  company: string;
-  location: string;
-  type: "full_time" | "part_time" | "contract" | "internship";
-  remote?: boolean;
-  salaryMin?: number | null;
-  salaryMax?: number | null;
-  currency?: string;
-  deadline?: string | null;
-  tags?: string[];
-  description?: string;
-  requirements?: string;
-  postedAt?: string; // ISO
-  status?: "active" | "closed";
-  logo?: string | null; // data URL base64
-  // NEW
-  experienceMinYears?: number | null;
-  experienceMaxYears?: number | null;
-  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | null;
-};
-
+/* ---------------- Types ---------------- */
 type CreatePayload = {
   title: string;
   location?: string;
   employment?: string;
   description?: string;
   isDraft?: boolean;
-  // backend tidak pakai semua field lokal, tapi kita simpan lokal lengkap
-  // NEW (opsional kirim ke server jika backend sudah mendukung)
   experienceMinYears?: number | null;
-  experienceMaxYears?: number | null;
-  education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | null;
+  education?: 'SMA/SMK' | 'D3' | 'S1' | 'S2' | 'S3' | null;
   salaryMin?: number | null;
   salaryMax?: number | null;
   currency?: string | null;
   tags?: string[];
-  remoteMode?: "ON_SITE" | "REMOTE" | "HYBRID"; // disederhanakan: pakai REMOTE saat checkbox true
+  remoteMode?: 'ON_SITE' | 'REMOTE' | 'HYBRID';
   company?: string;
   deadline?: string | null;
   requirements?: string;
 };
 
-const LS_KEY = "ark_jobs";
+type Province = { id: string; name: string };
+type City = { id: string; name: string };
 
-/* ---------------- Utils kecil ---------------- */
-function toIntOrNull(v: string): number | null {
-  const n = Number(String(v).replace(/[^0-9]/g, ""));
-  return Number.isFinite(n) && String(v).trim() !== "" ? n : null;
-}
+/* ---------------- Helpers ---------------- */
+const cleanNum = (s: string) => String(s ?? '').replace(/[^\d]/g, '');
+const toIntOrNull = (s?: string | null) => {
+  const n = Number(cleanNum(s ?? ''));
+  return Number.isFinite(n) && String(s ?? '').trim() !== '' ? n : null;
+};
+const fmtThousands = (v: string) =>
+  cleanNum(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-/* ---------------- Alert Modal (modern) ---------------- */
-function AlertModal({
-  title = "Berhasil",
-  message,
-  onClose,
-}: {
-  title?: string;
-  message: string;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none">
-            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <h2 className="text-center text-lg font-semibold text-slate-900">{title}</h2>
-        <p className="mt-2 text-center text-sm text-slate-600">{message}</p>
-        <div className="mt-5">
-          <button
-            onClick={onClose}
-            className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-          >
-            Oke
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- Page ---------------- */
+/* ======================================================================== */
 export default function NewJobPage() {
   const router = useRouter();
   const qs = useSearchParams();
-  const editId = qs.get("id"); // jika ada => mode edit
+  const editId = qs.get('id');
 
+  /* -------- UI state -------- */
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
+  /* -------- Employer (login) -------- */
+  const [employerId, setEmployerId] = useState<string>('');
+  const [companyName, setCompanyName] = useState<string>(''); // read-only badge
+
+  /* -------- Wilayah (Emsifa) -------- */
+  const [prov, setProv] = useState('');
+  const [kab, setKab] = useState('');
+  const [provinces, setProvinces] = useState<Province[]>([]);
+  const [cities, setCities] = useState<City[]>([]);
+
+  /* -------- Form -------- */
   const [form, setForm] = useState({
-    // --- field lokal (kaya) ---
-    title: "",
-    company: "",
-    location: "",
-    type: "full_time" as LocalJob["type"],
-    remote: false,
-    salaryMin: "",
-    salaryMax: "",
-    currency: "IDR",
-    deadline: "",
-    tags: "", // comma separated
-    description: "",
-    requirements: "",
-
-    // --- Pengalaman & Pendidikan (NEW) ---
-    experienceMinYears: "", // input string, kita parse ke number | null saat simpan
-    experienceMaxYears: "",
-    education: "" as "" | "SMA/SMK" | "D3" | "S1" | "S2" | "S3",
-
-    // --- field untuk backend (sederhana) ---
-    employment: "Full-time",
+    title: '',
+    location: '',
+    employment: 'Full-time',
+    description: '',
     isDraft: false,
-
-    // --- logo ---
-    logoFile: null as File | null,
-    logoPreview: "" as string, // data URL
+    remote: false,
+    salaryMin: '',
+    salaryMax: '',
+    currency: 'IDR',
+    deadline: '',
+    tags: '',
+    requirements: '',
+    experienceMinYears: '',
+    education: '' as '' | 'SMA/SMK' | 'D3' | 'S1' | 'S2' | 'S3',
   });
-
-  function set<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
-  }
 
-  // Prefill saat edit (dari localStorage)
+  /* ===================== 1) Fetch employer yg login ===================== */
   useEffect(() => {
-    if (!editId) return;
-    try {
-      const arr: LocalJob[] = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
-      const cur = arr.find((j) => String(j.id) === String(editId));
-      if (cur) {
-        setForm((p) => ({
-          ...p,
-          title: cur.title,
-          company: cur.company,
-          location: cur.location,
-          type: cur.type,
-          remote: !!cur.remote,
-          salaryMin: cur.salaryMin?.toString() ?? "",
-          salaryMax: cur.salaryMax?.toString() ?? "",
-          currency: cur.currency ?? "IDR",
-          deadline: cur.deadline ?? "",
-          tags: (cur.tags ?? []).join(", "),
-          description: cur.description ?? "",
-          requirements: cur.requirements ?? "",
-          // NEW prefill
-          experienceMinYears: cur.experienceMinYears?.toString() ?? "",
-          experienceMaxYears: cur.experienceMaxYears?.toString() ?? "",
-          education: (cur.education ?? "") as any,
-          // backend mapping (boleh diabaikan saat edit lama)
-          employment: p.employment,
-          isDraft: p.isDraft,
-          logoFile: null,
-          logoPreview: cur.logo ?? "",
-        }));
+    (async () => {
+      try {
+        const base = API.replace(/\/+$/, '');
+        const r = await fetch(`${base}/api/employers/auth/me`, {
+          credentials: 'include',
+        });
+
+        let eid: string | undefined;
+        let comp: string | undefined;
+
+        if (r.ok) {
+          const j = await r.json().catch(() => ({} as any));
+          // LOG agar mudah cek di console:
+          console.log('[auth/me] payload =', j);
+
+          // ---- id ----
+          eid =
+            j?.data?.employer?.id ||
+            j?.employer?.id ||
+            j?.id ||
+            undefined;
+
+          // ---- company name (lengkapi dengan displayName camelCase) ----
+          comp =
+            j?.data?.employer?.displayName ||        // ✅ tambahkan ini
+            j?.employer?.displayName ||              // ✅ tambahkan ini
+            j?.data?.employer?.display_name ||
+            j?.data?.employer?.company ||
+            j?.employer?.display_name ||
+            j?.employer?.company ||
+            undefined;
+        } else {
+          console.warn('[auth/me] HTTP', r.status);
+        }
+
+        // Fallback localStorage (kalau ada)
+        if (!eid) eid = localStorage.getItem('ark_employer_id') || undefined;
+        if (!comp) comp = localStorage.getItem('ark_employer_company') || undefined;
+
+        // Kalau ada id tapi nama belum ada — bisa coba endpoint profil
+        if (eid && !comp) {
+          const pr = await fetch(
+            `${base}/api/employers/profile?employerId=${encodeURIComponent(eid)}`,
+            { credentials: 'include' }
+          );
+          if (pr.ok) {
+            const pj = await pr.json().catch(() => ({} as any));
+            comp =
+              pj?.data?.displayName ||               // ✅ juga cek camelCase di sini
+              pj?.displayName ||
+              pj?.data?.display_name ||
+              pj?.data?.company ||
+              pj?.display_name ||
+              pj?.company ||
+              comp;
+          }
+        }
+
+        if (eid) setEmployerId(String(eid));
+        if (comp) setCompanyName(String(comp));
+      } catch (err) {
+        console.warn('[auth/me] error:', err);
       }
-    } catch {}
-  }, [editId]);
+    })();
+  }, []);
 
-  // handle file -> dataURL
-  const onPickLogo: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const f = e.target.files?.[0] || null;
-    set("logoFile", f);
-    if (!f) return set("logoPreview", "");
-    const reader = new FileReader();
-    reader.onload = () => set("logoPreview", String(reader.result || ""));
-    reader.readAsDataURL(f);
-  };
+  /* ===================== 2) Wilayah (Emsifa) ===================== */
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(
+          'https://www.emsifa.com/api-wilayah-indonesia/api/provinces.json'
+        );
+        const j = (await r.json()) as Province[];
+        setProvinces(j);
+      } catch {}
+    })();
+  }, []);
 
+  useEffect(() => {
+    if (!prov) {
+      setCities([]);
+      setKab('');
+      set('location', '');
+      return;
+    }
+    (async () => {
+      try {
+        const r = await fetch(
+          `https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${prov}.json`
+        );
+        const j = (await r.json()) as City[];
+        setCities(j);
+        setKab('');
+        const pName = provinces.find((p) => p.id === prov)?.name || '';
+        set('location', pName);
+      } catch {}
+    })();
+  }, [prov, provinces]);
+
+  useEffect(() => {
+    const pName = provinces.find((x) => x.id === prov)?.name || '';
+    const kName = cities.find((x) => x.id === kab)?.name || '';
+    const loc = [kName, pName].filter(Boolean).join(', ');
+    set('location', loc);
+  }, [kab, prov, provinces, cities]);
+
+  /* ===================== 3) Salary formatter ===================== */
+  const onSalaryMinChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+    set('salaryMin', fmtThousands(e.target.value));
+  const onSalaryMaxChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+    set('salaryMax', fmtThousands(e.target.value));
+
+  /* ===================== 4) Submit ===================== */
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!form.title.trim() || !form.company.trim() || !form.location.trim()) {
-      setToast({ type: "err", msg: "Judul, perusahaan, dan lokasi wajib diisi." });
+
+    if (!employerId) {
+      setToast({
+        type: 'err',
+        msg: 'Tidak menemukan employer yang login. Silakan login sebagai employer.',
+      });
+      return;
+    }
+    if (!companyName.trim()) {
+      setToast({ type: 'err', msg: 'Profil perusahaan belum lengkap (nama perusahaan).' });
+      return;
+    }
+    if (!form.title.trim()) {
+      setToast({ type: 'err', msg: 'Judul lowongan wajib diisi.' });
+      return;
+    }
+    if (!prov || !kab) {
+      setToast({ type: 'err', msg: 'Pilih Provinsi dan Kab/Kota.' });
       return;
     }
 
@@ -194,158 +224,80 @@ export default function NewJobPage() {
     setToast(null);
 
     try {
-      /* ---------------- 1) Simpan ke localStorage (selalu) ---------------- */
-      const nowIso = new Date().toISOString();
-
-      let arr: LocalJob[] = [];
-      try {
-        arr = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
-      } catch {}
-
-      const existing = editId ? arr.find((j) => String(j.id) === String(editId)) : undefined;
-
-      const localRec: LocalJob = {
-        id: editId ?? Date.now(),
+      const payload: CreatePayload = {
         title: form.title.trim(),
-        company: form.company.trim(),
-        location: form.location.trim(),
-        type: form.type,
-        remote: !!form.remote,
-        salaryMin: form.salaryMin ? Number(form.salaryMin) : null,
-        salaryMax: form.salaryMax ? Number(form.salaryMax) : null,
-        currency: form.currency || "IDR",
-        deadline: form.deadline || null,
-        tags: form.tags
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        description: form.description,
-        requirements: form.requirements,
-        postedAt: existing?.postedAt ?? nowIso,
-        status: existing?.status ?? "active",
-        logo: form.logoPreview || existing?.logo || null,
-        // NEW: pengalaman & pendidikan
-        experienceMinYears: toIntOrNull(form.experienceMinYears),
-        experienceMaxYears: toIntOrNull(form.experienceMaxYears),
-        education: (form.education || null) as LocalJob["education"],
-      };
-
-      if (existing) {
-        const i = arr.findIndex((j) => String(j.id) === String(editId));
-        if (i >= 0) arr[i] = { ...arr[i], ...localRec, id: arr[i].id };
-      } else {
-        arr.push(localRec);
-      }
-
-      localStorage.setItem(LS_KEY, JSON.stringify(arr));
-      window.dispatchEvent(new Event("ark:jobs-updated"));
-
-      /* ---------------- 2) Coba kirim ke server (opsional) ---------------- */
-      const employerId = localStorage.getItem("ark_employer_id") || "";
-      if (!employerId) {
-        // tidak menghalangi sukses lokal — beri info di modal
-        setSuccessMsg(
-          "Job tersimpan secara lokal.\nCatatan: Gagal menyimpan ke server karena tidak ada employerId (login sebagai employer dulu)."
-        );
-        return;
-      }
-
-      const payloadForBackend: CreatePayload = {
-        title: form.title.trim(),
-        location: form.location.trim(),
+        location: form.location,
         employment: form.employment,
         description: form.description,
         isDraft: form.isDraft,
-        // NEW: opsional untuk backend
         experienceMinYears: toIntOrNull(form.experienceMinYears),
-        experienceMaxYears: toIntOrNull(form.experienceMaxYears),
-        education: (form.education || null) as CreatePayload["education"],
+        education: (form.education || null) as CreatePayload['education'],
         salaryMin: toIntOrNull(form.salaryMin),
         salaryMax: toIntOrNull(form.salaryMax),
         currency: form.currency,
-        tags: localRec.tags,
-        remoteMode: form.remote ? "REMOTE" : "ON_SITE",
-        company: form.company.trim(),
+        tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+        remoteMode: form.remote ? 'REMOTE' : 'ON_SITE',
+        company: companyName,           // ← dari profile
         deadline: form.deadline || null,
         requirements: form.requirements,
       };
 
-      const res = await fetch(`${API.replace(/\/+$/, "")}/api/employer/jobs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          ...payloadForBackend,
-          employerId,
-          logoDataUrl: form.logoPreview || undefined, // simpan logo ke profil employer
-        }),
+      const res = await fetch(`${API.replace(/\/+$/, '')}/api/employer/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ...payload, employerId }),
       });
 
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok || !(json as any)?.ok) {
         const msg = (json as any)?.error || `HTTP ${res.status}`;
-        setSuccessMsg(`Job tersimpan secara lokal.\nCatatan: Gagal menyimpan ke server: ${msg}`);
+        setSuccessMsg(`Tersimpan lokal. Gagal menyimpan ke server: ${msg}`);
         return;
       }
-
-      // sukses server
-      setSuccessMsg("Job berhasil dipublikasikan ke server.");
+      setSuccessMsg('Job berhasil dipublikasikan.');
     } catch (err: any) {
-      const msg =
-        err?.message === "Failed to fetch"
-          ? "Job tersimpan lokal.\nCatatan: Gagal terhubung ke server. Periksa BACKEND & NEXT_PUBLIC_API_BASE/NEXT_PUBLIC_API_URL."
-          : `Job tersimpan lokal.\nCatatan: ${err?.message || "Gagal menyimpan ke server."}`;
-      setSuccessMsg(msg);
+      setSuccessMsg(
+        err?.message === 'Failed to fetch'
+          ? 'Gagal terhubung ke server. Periksa BACKEND & NEXT_PUBLIC_API_BASE.'
+          : err?.message || 'Gagal menyimpan.'
+      );
     } finally {
       setBusy(false);
     }
   }
 
+  /* ===================== 5) UI ===================== */
   return (
     <main className="min-h-[60vh] bg-slate-50">
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <h1 className="text-2xl font-semibold text-slate-900">{editId ? "Edit Job" : "Post a Job"}</h1>
-        <p className="mt-1 text-sm text-slate-600">Isi detail lowongan untuk dipublikasikan.</p>
+        <h1 className="text-2xl font-semibold text-slate-900">
+          {editId ? 'Edit Job' : 'Post a Job'}
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Isi detail lowongan. Nama perusahaan otomatis dari profil employer.
+        </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          {/* Logo uploader / preview */}
-          <div className="grid gap-4 sm:grid-cols-[96px,1fr] items-center">
-            <div className="h-20 w-20 rounded-2xl bg-slate-100 grid place-items-center overflow-hidden">
-              {form.logoPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img alt="logo" src={form.logoPreview} className="h-full w-full object-cover" />
-              ) : (
-                <span className="text-xs text-slate-500">Logo</span>
+          {/* Company badge + Job title */}
+          <div className="grid gap-4 sm:grid-cols-[1fr,2fr] items-end">
+            <div>
+              <div className="text-xs text-slate-600 mb-1">Company</div>
+              <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
+                <span className="truncate font-medium">{companyName || '—'}</span>
+              </div>
+              {!companyName && (
+                <div className="mt-1 text-xs text-amber-600">
+                  Nama perusahaan belum terbaca—pastikan sudah login sebagai employer.
+                </div>
               )}
             </div>
-            <div>
-              <label className="block text-xs text-slate-600 mb-1">Company Logo (optional)</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={onPickLogo}
-                className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-slate-300 file:px-3 file:py-1.5 file:bg-white"
-              />
-            </div>
-          </div>
 
-          {/* Company & Title */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-600">Company Name</span>
-              <input
-                value={form.company}
-                onChange={(e) => set("company", e.target.value)}
-                required
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="PT ArkWork Indonesia"
-              />
-            </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Job Title</span>
               <input
                 value={form.title}
-                onChange={(e) => set("title", e.target.value)}
+                onChange={(e) => set('title', e.target.value)}
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Frontend Engineer"
@@ -353,77 +305,52 @@ export default function NewJobPage() {
             </label>
           </div>
 
-          {/* Location & Type (lokal) + Employment (backend) */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-600">Location</span>
-              <input
-                value={form.location}
-                onChange={(e) => set("location", e.target.value)}
-                required
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="Jakarta / Remote"
-              />
-            </label>
-            <div className="grid gap-2">
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">Type (Local)</span>
-                <select
-                  value={form.type}
-                  onChange={(e) => set("type", e.target.value as LocalJob["type"])}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="full_time">Full-time</option>
-                  <option value="part_time">Part-time</option>
-                  <option value="contract">Contract</option>
-                  <option value="internship">Internship</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-600">Employment (Send to Server)</span>
-                <select
-                  value={form.employment}
-                  onChange={(e) => set("employment", e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option>Full-time</option>
-                  <option>Part-time</option>
-                  <option>Contract</option>
-                  <option>Internship</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          {/* Currency, Deadline, Remote */}
+          {/* Lokasi via Emsifa */}
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Provinsi</span>
+              <select value={prov} onChange={(e) => setProv(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                <option value="">-- pilih --</option>
+                {provinces.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Kab/Kota</span>
+              <select value={kab} onChange={(e) => setKab(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" disabled={!prov}>
+                <option value="">-- pilih --</option>
+                {cities.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Location (gabungan)</span>
+              <input value={form.location} readOnly className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm" placeholder="Kab/Kota, Provinsi" />
+            </label>
+          </div>
+
+          {/* Employment + Currency + Remote */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Employment</span>
+              <select value={form.employment} onChange={(e) => set('employment', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                <option>Full-time</option>
+                <option>Part-time</option>
+                <option>Contract</option>
+                <option>Internship</option>
+              </select>
+            </label>
+            <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Currency</span>
-              <select
-                value={form.currency}
-                onChange={(e) => set("currency", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              >
+              <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option>IDR</option>
                 <option>USD</option>
               </select>
             </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-600">Deadline</span>
-              <input
-                type="date"
-                value={form.deadline}
-                onChange={(e) => set("deadline", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              />
-            </label>
             <label className="mt-6 inline-flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.remote}
-                onChange={(e) => set("remote", e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
-              />
+              <input type="checkbox" checked={form.remote} onChange={(e) => set('remote', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
               Remote-friendly
             </label>
           </div>
@@ -432,59 +359,23 @@ export default function NewJobPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Salary Min</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={form.salaryMin}
-                onChange={(e) => set("salaryMin", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="10000000"
-              />
+              <input value={form.salaryMin} onChange={onSalaryMinChange} inputMode="numeric" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="10,000,000" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Salary Max</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={form.salaryMax}
-                onChange={(e) => set("salaryMax", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="20000000"
-              />
+              <input value={form.salaryMax} onChange={onSalaryMaxChange} inputMode="numeric" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="20,000,000" />
             </label>
           </div>
 
-          {/* Pengalaman & Pendidikan (NEW) */}
+          {/* Experience + Education + Deadline */}
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-600">Experience Min (years)</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={form.experienceMinYears}
-                onChange={(e) => set("experienceMinYears", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="0"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-600">Experience Max (years)</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={form.experienceMaxYears}
-                onChange={(e) => set("experienceMaxYears", e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                placeholder="3"
-              />
+              <span className="mb-1 block text-xs text-slate-600">Min Experience (years)</span>
+              <input value={form.experienceMinYears} onChange={(e) => set('experienceMinYears', cleanNum(e.target.value))} inputMode="numeric" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="0" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-600">Education</span>
-              <select
-                value={form.education}
-                onChange={(e) => set("education", e.target.value as any)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              >
+              <select value={form.education} onChange={(e) => set('education', e.target.value as any)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option value="">Any</option>
                 <option value="SMA/SMK">SMA/SMK</option>
                 <option value="D3">D3</option>
@@ -493,87 +384,55 @@ export default function NewJobPage() {
                 <option value="S3">S3</option>
               </select>
             </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-600">Deadline</span>
+              <input type="date" value={form.deadline} onChange={(e) => set('deadline', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+            </label>
           </div>
 
-          {/* Tags */}
+          {/* Tags, Description, Requirements */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Tags (comma separated)</span>
-            <input
-              value={form.tags}
-              onChange={(e) => set("tags", e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              placeholder="react, nextjs, tailwind"
-            />
+            <input value={form.tags} onChange={(e) => set('tags', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="react, nextjs, tailwind" />
           </label>
 
-          {/* Description */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Description</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              rows={5}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              placeholder="Describe the role, team, responsibilities..."
-            />
+            <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={5} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Describe the role…" />
           </label>
 
-          {/* Requirements */}
           <label className="block">
             <span className="mb-1 block text-xs text-slate-600">Requirements</span>
-            <textarea
-              value={form.requirements}
-              onChange={(e) => set("requirements", e.target.value)}
-              rows={5}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              placeholder="e.g., 3+ years of experience, familiar with React, etc."
-            />
+            <textarea value={form.requirements} onChange={(e) => set('requirements', e.target.value)} rows={5} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="- 3+ years…" />
           </label>
 
-          {/* Draft (backend) */}
           <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={form.isDraft}
-              onChange={(e) => set("isDraft", e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
-            />
+            <input type="checkbox" checked={form.isDraft} onChange={(e) => set('isDraft', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
             Save as draft (server)
           </label>
 
-          {/* Actions */}
           <div className="flex items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => history.back()}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
+            <button type="button" onClick={() => history.back()} className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {busy ? (editId ? "Updating…" : "Publishing…") : editId ? "Update Job" : "Publish Job"}
+            <button type="submit" disabled={busy} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+              {busy ? 'Publishing…' : 'Publish Job'}
             </button>
           </div>
         </form>
       </div>
 
-      {/* Toast kecil */}
+      {/* Toast */}
       {toast && (
         <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4">
-          <div
-            className={`pointer-events-auto w-full max-w-md rounded-2xl border p-4 shadow-2xl backdrop-blur ${
-              toast.type === "ok"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-rose-200 bg-rose-50 text-rose-900"
-            }`}
-          >
+          <div className={`pointer-events-auto w-full max-w-md rounded-2xl border p-4 shadow-2xl backdrop-blur ${
+            toast.type === 'ok'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-rose-200 bg-rose-50 text-rose-900'
+          }`}>
             <div className="flex items-start gap-3">
-              <div className="shrink-0 h-6 w-6 rounded-full bg-black/10 grid place-items-center">
-                {toast.type === "ok" ? "✓" : "!"}
+              <div className="grid h-6 w-6 place-items-center rounded-full bg-black/10">
+                {toast.type === 'ok' ? '✓' : '!'}
               </div>
               <div className="flex-1 text-sm">{toast.msg}</div>
               <button onClick={() => setToast(null)} className="rounded-lg border px-2 text-xs hover:bg-white/50">
@@ -584,16 +443,22 @@ export default function NewJobPage() {
         </div>
       )}
 
-      {/* Modal sukses */}
+      {/* Success Modal */}
       {successMsg && (
-        <AlertModal
-          title="Berhasil"
-          message={successMsg}
-          onClose={() => {
-            setSuccessMsg(null);
-            router.push("/jobs");
-          }}
-        />
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-center text-lg font-semibold text-slate-900">Berhasil</h2>
+            <p className="mt-2 whitespace-pre-line text-center text-sm text-slate-600">{successMsg}</p>
+            <div className="mt-5">
+              <button
+                onClick={() => { setSuccessMsg(null); router.push('/jobs'); }}
+                className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                Oke
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

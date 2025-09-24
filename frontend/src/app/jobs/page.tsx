@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 
@@ -11,7 +11,10 @@ const API_BASE =
   (process.env.NODE_ENV === "development" ? "http://localhost:4000" : "");
 
 /* -------- Report Dialog (dynamic supaya bukan RSC) -------- */
-const ReportDialog = dynamic(() => import("@/app/admin/reports/ReportDialog"), { ssr: false });
+const ReportDialog = dynamic(
+  () => import("@/app/admin/reports/ReportDialog"),
+  { ssr: false }
+);
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -206,7 +209,22 @@ export default function JobsPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportDefaults, setReportDefaults] = useState<{ judul?: string; perusahaan?: string; alasan?: string; catatan?: string; }>({});
 
-  // simpan user id dari backend ke localStorage agar badge "sudah dilamar" sinkron
+  // CV states
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
+
+  // toast simple
+  const [toast, setToast] = useState<{type:"ok"|"err"; msg:string}|null>(null);
+  const hideToastRef = useRef<number | null>(null);
+  const showToast = (type:"ok"|"err", msg:string) => {
+    setToast({ type, msg });
+    if (hideToastRef.current) window.clearTimeout(hideToastRef.current);
+    hideToastRef.current = window.setTimeout(() => setToast(null), 3000);
+  };
+
+  useEffect(() => () => { if (hideToastRef.current) window.clearTimeout(hideToastRef.current); }, []);
+
+  // Sinkronkan ark_current dari backend (cookie session user)
   useEffect(() => {
     (async () => {
       const userIdFromCookie = await getCurrentUserId();
@@ -221,7 +239,7 @@ export default function JobsPage() {
     })();
   }, []);
 
-  const refreshAppliedForCurrent = useCallback(() => {
+  const refreshAppliedForCurrent = () => {
     try {
       const cur = localStorage.getItem("ark_current");
       if (!cur) return setApplied([]);
@@ -231,85 +249,80 @@ export default function JobsPage() {
     } catch {
       setApplied([]);
     }
-  }, []);
+  };
 
-  // loader dipisah supaya bisa dipanggil ulang saat "ark:jobs-updated"
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      setLoadErr(null);
-      const base = (API_BASE || "").replace(/\/+$/, "");
-      if (!base) {
-        setLoadErr("API base tidak terkonfigurasi");
-        setJobs([]);
-        return;
-      }
-      const opts: RequestInit = { credentials: "include", signal };
+  useEffect(() => {
+    const ac = new AbortController(); let alive = true;
 
-      // 1) Semua job aktif (dari DB)
-      const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
-      if (signal?.aborted) return;
-
-      if (r1.ok) {
-        const j1 = await r1.json().catch(() => null);
-        const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
-        const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
-        setJobs(mapped);
-        return;
-      }
-
-      // 2) Fallback: job milik employer login (opsional)
-      const eid = localStorage.getItem("ark_employer_id");
-      if (eid) {
-        const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
-        if (signal?.aborted) return;
-
-        if (r2.ok) {
-          const j2 = await r2.json().catch(() => null);
-          const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
-          const mapped2 = normalizeServer(serverList2).sort((a, b) => sortByPosted(a, b, sort === "newest"));
-          setJobs(mapped2);
+    (async () => {
+      try {
+        setLoadErr(null);
+        const base = (API_BASE || "").replace(/\/+$/, "");
+        if (!base) {
+          setLoadErr("API base tidak terkonfigurasi");
+          setJobs([]);
           return;
         }
-      }
+        const opts: RequestInit = { credentials: "include", signal: ac.signal };
 
-      setJobs([]);
-      setLoadErr(`Gagal memuat dari server (HTTP ${r1.status}).`);
-    } catch (e: any) {
-      if (!signal?.aborted) {
-        console.error("[JobsPage] load error:", e);
-        setLoadErr(e?.message || "Gagal memuat data");
+        // 1) Semua job aktif (dari DB)
+        const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
+        if (!alive) return;
+
+        if (r1.ok) {
+          const j1 = await r1.json().catch(() => null);
+          const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
+          const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
+          setJobs(mapped);
+          return;
+        }
+
+        // 2) Fallback: job milik employer login (opsional)
+        const eid = localStorage.getItem("ark_employer_id");
+        if (eid) {
+          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
+          if (!alive) return;
+
+          if (r2.ok) {
+            const j2 = await r2.json().catch(() => null);
+            const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
+            const mapped2 = normalizeServer(serverList2).sort((a, b) => sortByPosted(a, b, sort === "newest"));
+            setJobs(mapped2);
+            return;
+          }
+        }
+
         setJobs([]);
+        setLoadErr(`Gagal memuat dari server (HTTP ${r1.status}).`);
+      } catch (e: any) {
+        if (!ac.signal.aborted) {
+          console.error("[JobsPage] load error:", e);
+          setLoadErr(e?.message || "Gagal memuat data");
+          setJobs([]);
+        }
       }
-    }
-  }, [sort]);
+    })();
 
-  // pertama kali & saat sort berubah
-  useEffect(() => {
-    const ac = new AbortController();
-    load(ac.signal);
     try {
       setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
     } catch {}
+
     refreshAppliedForCurrent();
 
-    const onStorage = () => {
+    const onUpd = () => {
       refreshAppliedForCurrent();
       try {
         setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
       } catch {}
     };
-    window.addEventListener("storage", onStorage);
-
-    // listen event dari halaman admin (hapus/nonaktif job)
-    const onJobsUpdated = () => load(ac.signal);
-    window.addEventListener("ark:jobs-updated", onJobsUpdated);
+    window.addEventListener("storage", onUpd);
 
     return () => {
+      alive = false;
       ac.abort();
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("ark:jobs-updated", onJobsUpdated);
+      window.removeEventListener("storage", onUpd);
     };
-  }, [load, refreshAppliedForCurrent]);
+  }, [sort]);
 
   const dateFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "2-digit" }),
@@ -352,13 +365,29 @@ export default function JobsPage() {
 
   function openDetail(job: Job) {
     setDetailJob(job);
+    setCvFile(null);                   // reset CV tiap buka modal
     setDetailOpen(true);
   }
 
-  // ===== APPLY (kirim ke API; simpan jejak lokal “sudah dilamar” untuk user) =====
-  async function applySelected(sel: Job | null) {
-    if (!sel) return;
+  // ===== APPLY (FormData + CV PDF) =====
+  async function applySelected(sel: Job | null, file: File | null) {
+    if (!sel || isApplying) return;
 
+    // Validasi CV
+    if (!file) {
+      showToast("err","Silakan pilih file CV (PDF).");
+      return;
+    }
+    if (file.type !== "application/pdf") {
+      showToast("err","CV harus PDF.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("err","Ukuran CV maksimal 2 MB.");
+      return;
+    }
+
+    // pastikan tau user siapa dari cookie session
     let cur = localStorage.getItem("ark_current");
     if (!cur) {
       cur = await getCurrentUserId();
@@ -367,10 +396,40 @@ export default function JobsPage() {
       }
     }
     if (!cur) {
-      alert("Silakan login terlebih dahulu untuk melamar.");
+      showToast("err","Silakan login terlebih dahulu untuk melamar.");
       return;
     }
 
+    const base = (API_BASE || "").replace(/\/+$/, "");
+    setIsApplying(true);
+    let sentToServer = false;
+
+    if (base) {
+      try {
+        const fd = new FormData();
+        fd.set("jobId", String(sel.id));
+        fd.set("cv", file);
+
+        const res = await fetch(`${base}/api/applications`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({} as any));
+          throw new Error(err?.error || `Server ${res.status}`);
+        }
+        sentToServer = true;
+      } catch (e: any) {
+        console.error("[apply] API gagal:", e);
+        showToast("err", e?.message || "Gagal mengirim lamaran.");
+        setIsApplying(false);
+        return;
+      }
+    }
+
+    // update cache lokal agar badge langsung berubah
     let apps: Record<string, { jobId: string; date: string }[]> = {};
     try {
       apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
@@ -381,37 +440,16 @@ export default function JobsPage() {
 
     const jobId = String(sel.id);
     const userArr = Array.isArray(apps[cur]) ? apps[cur] : [];
-
-    if (userArr.some((a) => String(a.jobId) === jobId)) {
-      alert("Anda sudah melamar lowongan ini.");
-      return;
+    if (!userArr.some((a) => String(a.jobId) === jobId)) {
+      const next = [...userArr, { jobId, date: new Date().toISOString().slice(0, 10) }];
+      apps[cur] = next;
+      localStorage.setItem("ark_apps", JSON.stringify(apps));
     }
-
-    const base = (API_BASE || "").replace(/\/+$/, "");
-    let sentToServer = false;
-
-    if (base) {
-      try {
-        const res = await fetch(`${base}/api/applications`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ jobId }),
-        });
-        if (!res.ok) throw new Error(`Server ${res.status}`);
-        sentToServer = true;
-      } catch (e) {
-        console.error("[apply] API gagal:", e);
-      }
-    }
-
-    const next = [...userArr, { jobId, date: new Date().toISOString().slice(0, 10) }];
-    apps[cur] = next;
-    localStorage.setItem("ark_apps", JSON.stringify(apps));
     try { setApplied((s) => [...new Set([...s, jobId])]); } catch {}
 
+    setIsApplying(false);
     setDetailOpen(false);
-    alert(sentToServer ? "Lamaran terkirim!" : "Gagal kirim ke server.");
+    showToast(sentToServer ? "ok" : "err", sentToServer ? "Lamaran terkirim!" : "Gagal kirim ke server.");
   }
 
   function onReport(job: Job) {
@@ -426,6 +464,18 @@ export default function JobsPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
+      {/* Toast */}
+      {toast && (
+        <div
+          role="status"
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[300] rounded-xl px-4 py-2 text-sm shadow ${
+            toast.type === "ok" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       {/* Header */}
       <header className="border-b border-neutral-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
@@ -582,10 +632,13 @@ export default function JobsPage() {
         <DetailModal
           job={detailJob}
           onClose={() => setDetailOpen(false)}
-          onApply={() => applySelected(detailJob)}
+          onApply={() => applySelected(detailJob, cvFile)}
           postedText={formatPosted(detailJob.posted)}
           onReport={() => onReport(detailJob)}
-          disabled={reportOpen}
+          disabled={reportOpen || isApplying}
+          cvFile={cvFile}
+          setCvFile={setCvFile}
+          isApplying={isApplying}
         />
       )}
 
@@ -598,7 +651,7 @@ export default function JobsPage() {
             defaultData={reportDefaults}
             onSubmitted={() => {
               setReportOpen(false);
-              alert("Terima kasih. Laporanmu telah kami terima.");
+              showToast("ok","Terima kasih. Laporanmu telah kami terima.");
             }}
           />
         </div>
@@ -656,7 +709,7 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-/* --------- Detail Modal --------- */
+/* --------- Detail Modal (dengan Upload CV) --------- */
 function DetailModal({
   job,
   postedText,
@@ -664,6 +717,9 @@ function DetailModal({
   onApply,
   onReport,
   disabled = false,
+  cvFile,
+  setCvFile,
+  isApplying = false,
 }: {
   job: Job;
   postedText: string;
@@ -671,7 +727,30 @@ function DetailModal({
   onApply: () => void;
   onReport: () => void;
   disabled?: boolean;
+  cvFile: File | null;
+  setCvFile: (f: File | null) => void;
+  isApplying?: boolean;
 }) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const onPick: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+    const f = e.currentTarget.files?.[0] || null;
+    if (!f) { setCvFile(null); return; }
+    if (f.type !== "application/pdf") {
+      alert("CV harus berformat PDF.");
+      e.currentTarget.value = "";
+      setCvFile(null);
+      return;
+    }
+    if (f.size > 2 * 1024 * 1024) {
+      alert("Ukuran CV maksimal 2 MB.");
+      e.currentTarget.value = "";
+      setCvFile(null);
+      return;
+    }
+    setCvFile(f);
+  };
+
   return (
     <div className={["fixed inset-0 z-[100]", disabled ? "pointer-events-none" : ""].join(" ")} aria-hidden={disabled ? true : undefined}>
       <div className="absolute inset-0 backdrop-blur-[2px] bg-black/50" onClick={disabled ? undefined : onClose} />
@@ -685,7 +764,7 @@ function DetailModal({
             <p className="mt-1 text-center text-sm text-slate-600">{postedText}</p>
           </div>
 
-          <div className="max-h-[65vh] overflow-auto px-6 py-5 space-y-5">
+          <div className="max-h-[60vh] overflow-auto px-6 py-5 space-y-5">
             <div>
               <div className="text-xl font-bold text-slate-900">{job.title}</div>
               <div className="text-sm text-slate-600">{job.company}</div>
@@ -709,12 +788,38 @@ function DetailModal({
                 <RichText text={job.requirements} />
               </Section>
             ) : null}
+
+            {/* ==== NEW: Upload CV ==== */}
+            <Section title="Unggah CV (PDF, maks 2 MB)">
+              <div className="flex items-center gap-3">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/pdf"
+                  onChange={onPick}
+                  className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold hover:file:bg-slate-50"
+                />
+              </div>
+              {cvFile ? (
+                <p className="mt-2 text-xs text-slate-600">
+                  Dipilih: <span className="font-medium">{cvFile.name}</span> ({(cvFile.size / 1024).toFixed(0)} KB)
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">Wajib unggah CV dalam format PDF.</p>
+              )}
+            </Section>
           </div>
 
           <div className="px-6 pb-6 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button onClick={onReport} className="rounded-xl border border-red-500 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Laporkan</button>
             <button onClick={onClose} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Tutup</button>
-            <button onClick={onApply} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Lamar</button>
+            <button
+              onClick={onApply}
+              disabled={disabled || isApplying}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${isApplying ? "bg-slate-400" : "bg-slate-900 hover:bg-slate-800"}`}
+            >
+              {isApplying ? "Mengirim..." : "Lamar"}
+            </button>
           </div>
         </div>
       </div>

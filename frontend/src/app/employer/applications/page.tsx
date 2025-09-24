@@ -15,7 +15,8 @@ type AppRow = {
   candidateEmail?: string | null;
   jobTitle: string;
   status: 'submitted' | 'review' | 'shortlist' | 'rejected' | 'hired';
-  createdAt: string; // ISO
+  createdAt: string | null; // ISO | null
+  cv?: { url: string; name?: string | null; type?: string | null; size?: number | null } | null;
 };
 
 type Counters = {
@@ -53,12 +54,10 @@ export default function EmployerApplicationsPage() {
 
       const res = await fetch(u.toString(), {
         credentials: 'include',
-        headers: { 'X-Employer-Id': employerId },
+        headers: { 'X-Employer-Id': employerId }, // kalau middlewaremu tidak butuh header ini, tidak apa-apa ada
       });
 
       const json = await res.json().catch(() => ({}));
-
-      // kalau HTTP error → tampilkan error
       if (!res.ok) {
         setErr(json?.error || `HTTP ${res.status}`);
         setRows([]);
@@ -66,8 +65,6 @@ export default function EmployerApplicationsPage() {
         return;
       }
 
-      // server baru: { ok: true, data: { rows, counters } }
-      // server lama: { rows, counters }
       const payload = json?.data || json || {};
       setRows(Array.isArray(payload.rows) ? payload.rows : []);
       setCounters(
@@ -88,8 +85,21 @@ export default function EmployerApplicationsPage() {
     load();
   }, []);
 
-  const pretty = (iso?: string) =>
-    !iso ? '-' : new Date(iso).toLocaleDateString();
+  const pretty = (iso: string | null | undefined) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  // helper agar link CV bisa diakses lintas origin
+  const cvHref = (partial?: string | null) => {
+    if (!partial) return '#';
+    const base = (API || '').replace(/\/+$/, '');
+    // Kalau partial sudah absolute (http...), biarkan
+    if (/^https?:\/\//i.test(partial)) return partial;
+    return `${base}${partial.startsWith('/') ? '' : '/'}${partial}`;
+  };
 
   return (
     <>
@@ -126,12 +136,13 @@ export default function EmployerApplicationsPage() {
                   <th className="px-4 py-3">Job</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">CV</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-600">
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
                       Loading…
                     </td>
                   </tr>
@@ -139,7 +150,7 @@ export default function EmployerApplicationsPage() {
 
                 {!loading && err && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-rose-600">
+                    <td colSpan={6} className="px-4 py-8 text-center text-rose-600">
                       Error: {err}{' '}
                       {/^HTTP 401/.test(err) && (
                         <span className="text-slate-600">
@@ -153,7 +164,7 @@ export default function EmployerApplicationsPage() {
 
                 {!loading && !err && rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-600">
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
                       Belum ada pelamar.
                     </td>
                   </tr>
@@ -170,6 +181,20 @@ export default function EmployerApplicationsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{pretty(r.createdAt)}</td>
+                    <td className="px-4 py-3">
+                      {r.cv ? (
+                        <a
+                          href={cvHref(r.cv.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-700 underline"
+                        >
+                          {r.cv.name || 'CV'}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

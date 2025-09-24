@@ -7,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// ===================== User & Admin =====================
+/* ===================== User & Admin ===================== */
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -32,6 +32,7 @@ model Admin {
   updatedAt    DateTime @default(now()) @updatedAt
 }
 
+/* ===================== Tender ===================== */
 model Tender {
   id          Int      @id @default(autoincrement())
   title       String
@@ -49,7 +50,7 @@ model Tender {
   budgetUSD   BigInt   @map("budget_usd")
 }
 
-/// ===================== Employer =====================
+/* ===================== Employer ===================== */
 model Employer {
   id             String                @id @default(uuid()) @db.Uuid
   slug           String                @unique
@@ -161,7 +162,7 @@ model EmployerMeta {
   @@map("employer_meta")
 }
 
-/// ===================== Plans / Payments =====================
+/* ===================== Plans / Payments ===================== */
 model Plan {
   id            String         @id @default(uuid()) @db.Uuid
   slug          String         @unique
@@ -233,28 +234,40 @@ model Payment {
   @@map("payments")
 }
 
-/// ===================== Jobs =====================
+/* ===================== Jobs ===================== */
 model Job {
-  id          String   @id @default(uuid()) @db.Uuid
-  employerId  String   @map("employer_id") @db.Uuid
+  id          String      @id @default(uuid()) @db.Uuid
+  employerId  String      @map("employer_id") @db.Uuid
   title       String
   description String?
   location    String?
-  employment  String?
-  isDraft     Boolean  @default(true) @map("is_draft")
-  isActive    Boolean  @default(false) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  employer    Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  employment  String?     // Full-time | Part-time | Contract | Internship
+  isDraft     Boolean     @default(true)  @map("is_draft")
+  isActive    Boolean     @default(false) @map("is_active")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  /* ------ Tambahan untuk listing & filter di FE ------ */
+  salaryMin           Int?         @map("salary_min")
+  salaryMax           Int?         @map("salary_max")
+  currency            String?      @default("IDR")
+  remoteMode          RemoteMode?  @default(ON_SITE) @map("remote_mode")
+  experienceMinYears  Int?         @map("exp_min_years")
+  education           Education?   // SMA/SMK | D3 | S1 | S2 | S3
+  deadline            DateTime?    // @db.Timestamptz(6) opsional
+  tags                String[]     @default([])      // text[] di Postgres
+  requirements        String?
+
+  employer    Employer  @relation(fields: [employerId], references: [id], onDelete: Cascade)
   applications JobApplication[]
   savedBy      SavedJob[]
 
   @@index([employerId, isActive])
+  @@index([createdAt])
   @@map("jobs")
 }
 
-/// ===================== Verification =====================
+/* ===================== Verification ===================== */
 model VerificationRequest {
   id         String             @id @default(uuid()) @db.Uuid
   employerId String             @map("employer_id") @db.Uuid
@@ -293,7 +306,7 @@ model VerifyToken {
   @@map("verify_tokens")
 }
 
-/// ===================== Sessions =====================
+/* ===================== Sessions ===================== */
 model Session {
   id         String    @id @default(cuid())
   userId     String?
@@ -325,7 +338,7 @@ model Report {
   @@index([status])
 }
 
-/// ===================== JOB APPLICATIONS & SAVED JOBS =====================
+/* ===================== JOB APPLICATIONS & SAVED JOBS ===================== */
 enum ApplicationStatus {
   submitted
   review
@@ -341,6 +354,12 @@ model JobApplication {
   status      ApplicationStatus @default(submitted)
   createdAt   DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /* ------ CV upload (PDF ≤ 2MB dibatasi di middleware upload) ------ */
+  cvUrl       String?  @map("cv_url")
+  cvFileName  String?  @map("cv_file_name")
+  cvFileType  String?  @map("cv_file_type")   // mis. application/pdf
+  cvFileSize  Int?     @map("cv_file_size")   // bytes (contoh: 2_000_000)
 
   job       Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
   applicant User @relation(fields: [applicantId], references: [id], onDelete: Cascade)
@@ -366,7 +385,7 @@ model SavedJob {
   @@map("saved_jobs")
 }
 
-/// ===================== Tender Enums =====================
+/* ===================== Tender Enums ===================== */
 enum Sector {
   OIL_GAS
   RENEWABLE_ENERGY
@@ -394,7 +413,7 @@ enum Contract {
   O_M         @map("O&M")
 }
 
-/// ===================== Enums lainnya =====================
+/* ===================== Enums lainnya ===================== */
 enum EmployerStatus {
   draft
   active
@@ -432,4 +451,19 @@ enum OnboardingStep {
   DONE
 
   @@map("onboarding_step")
+}
+
+/* ====== Enums baru untuk Job ====== */
+enum RemoteMode {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+enum Education {
+  SMA_SMK   @map("SMA/SMK")
+  D3
+  S1
+  S2
+  S3
 }

@@ -1,58 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { SignedIn, SignedOut, RedirectToSignIn, useUser } from '@clerk/nextjs';
-import { useAuth as useLocalAuth } from '@/hooks/useAuth';
 
-/* ============================ Page ============================ */
+type AdminSidebarProps = {
+  userEmail?: string | null;
+  onLogout?: () => Promise<void> | void;
+};
 
-export default function AdminPage() {
-  const { user } = useUser();
-  // Role dari Clerk publicMetadata (default "user")
-  const role = ((user?.publicMetadata as any)?.role as string) || 'user';
-
-  return (
-    <>
-      <SignedIn>
-        {role === 'admin' ? (
-          <div className="min-h-screen bg-neutral-50 md:pl-72">
-            <AdminSidebar />
-            <main className="p-6">
-              <h1 className="text-xl font-semibold">Admin Panel</h1>
-              <p className="text-gray-600 mt-2">
-                Selamat datang, {user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress}
-              </p>
-            </main>
-          </div>
-        ) : (
-          <div className="min-h-screen bg-neutral-50 md:pl-72">
-            <AdminSidebar />
-            <main className="p-6">
-              <h1 className="text-xl font-semibold text-rose-600">Akses ditolak</h1>
-              <p className="text-gray-600 mt-2">Halaman ini khusus admin.</p>
-            </main>
-          </div>
-        )}
-      </SignedIn>
-
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
-  );
-}
-
-/* ========================= Sidebar ========================= */
-
-function AdminSidebar() {
+export default function AdminSidebar({ userEmail, onLogout }: AdminSidebarProps) {
   const currentPath = usePathname() ?? '';
-  const router = useRouter();
-
-  // kalau mau pakai Clerk signOut langsung, ganti ke useClerk().signOut
-  const { signout, user } = useLocalAuth();
-
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -68,9 +26,7 @@ function AdminSidebar() {
   }, [open]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -81,17 +37,14 @@ function AdminSidebar() {
   const handleLogout = useCallback(async () => {
     try {
       setBusy(true);
-      await signout();
-      router.replace('/auth/signin');
-      router.refresh();
+      await onLogout?.();
     } catch (e) {
       console.error('Logout failed:', e);
     } finally {
       setBusy(false);
     }
-  }, [router, signout]);
+  }, [onLogout]);
 
-  // Tambah "Employer Jobs" yang menuju /admin/employers/jobs
   const menu = useMemo(
     () => [
       { name: 'Dashboard', path: '/admin', icon: HomeIcon },
@@ -208,7 +161,7 @@ function AdminSidebar() {
           {!collapsed && (
             <div className="min-w-0 leading-tight">
               <div className="text-xs font-semibold">Administrator</div>
-              <div className="text-[11px] text-white/60 truncate">{user?.email ?? 'admin@arkwork.local'}</div>
+              <div className="text-[11px] text-white/60 truncate">{userEmail ?? 'admin@arkwork.local'}</div>
             </div>
           )}
           {!collapsed && (
@@ -432,3 +385,4 @@ function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+  

@@ -1,4 +1,3 @@
-// backend/src/app.ts
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -17,9 +16,11 @@ import adminPlansRouter from './routes/admin-plans';
 import paymentsRouter from './routes/payments';
 import tendersRouter from './routes/tenders';
 import adminTendersRouter from './routes/admin-tenders';
-import jobsRouter from './routes/jobs';
+import { jobsRouter } from './routes/jobs';
 import reportsRouter from './routes/reports';
 import ratesRouter from './routes/rates';
+
+// NEW
 import applicationsRouter from './routes/applications';
 import employerApplicationsRouter from './routes/employer-applications';
 
@@ -69,7 +70,6 @@ if (NODE_ENV === 'production') app.set('trust proxy', 1);
 
 app.use(morgan('dev'));
 app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 /* BigInt -> string */
@@ -97,7 +97,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, status: 'healthy' }))
 
 /* ================= ROUTES (ORDER MATTERS!) ================= */
 /* SPECIFIC first */
-// Employers read applications — DITARUH SEBELUM /api/employers
+// NEW: Employers read applications — DITARUH SEBELUM /api/employers
 app.use('/api/employers/applications', employerApplicationsRouter);
 
 /* Auth kandidat/user */
@@ -121,7 +121,7 @@ app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
 
 /* Jobs API (existing) */
-app.use('/api/jobs', jobsRouter);
+app.use('/api', jobsRouter);
 
 /* Applications API (candidate applies) */
 app.use('/api/applications', applicationsRouter);
@@ -157,5 +157,3 @@ function startServer(port: number) {
   });
 }
 startServer(DEFAULT_PORT);
-
-export default app;

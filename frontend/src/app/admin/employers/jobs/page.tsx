@@ -56,25 +56,18 @@ export default function AdminEmployersJobsPage() {
     }
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return rows.filter((r) =>
-      [r.title, r.company ?? "", r.location ?? "", r.employment ?? "", r.description ?? ""].some((v) =>
-        v.toLowerCase().includes(s)
-      )
+      [r.title, r.company ?? "", r.location ?? "", r.employment ?? "", r.description ?? ""]
+        .some((v) => v.toLowerCase().includes(s))
     );
   }, [rows, q]);
 
-  /** KIRIM event ke FE list jobs + payload (jobId, action) */
-  const broadcastJobsUpdated = (detail?: { jobId?: string; action?: "delete" | "deactivate" }) => {
-    try {
-      window.dispatchEvent(new CustomEvent("ark:jobs-updated", { detail }));
-    } catch {}
+  const broadcastJobsUpdated = () => {
+    try { window.dispatchEvent(new Event("ark:jobs-updated")); } catch {}
   };
 
   const deleteJob = async (job: Job) => {
@@ -100,7 +93,7 @@ export default function AdminEmployersJobsPage() {
       const res = await fetch(API(`/jobs/${job.id}`), { method: "DELETE", credentials: "include" });
       if (!res.ok && res.status !== 204) throw new Error(`Delete failed ${res.status}`);
       setRows((prev) => prev.filter((x) => x.id !== job.id));
-      broadcastJobsUpdated({ jobId: job.id, action: "delete" }); // >>> payload
+      broadcastJobsUpdated(); // “nyetrum” jobs/page.tsx
       alert("Job dihapus dari database.");
     } catch (e: any) {
       console.error("Gagal hapus:", e);
@@ -119,7 +112,7 @@ export default function AdminEmployersJobsPage() {
       });
       if (!res.ok) throw new Error(`Patch failed ${res.status}`);
       setRows((prev) => prev.map((x) => (x.id === job.id ? { ...x, isActive: false } : x)));
-      broadcastJobsUpdated({ jobId: job.id, action: "deactivate" }); // >>> payload
+      broadcastJobsUpdated();
       alert("Job dinonaktifkan.");
     } catch (e) {
       console.error(e);
@@ -150,9 +143,7 @@ export default function AdminEmployersJobsPage() {
       <div className="rounded-2xl border bg-white p-3">
         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
           <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">
-              Filter Employer ID (opsional)
-            </span>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-500">Filter Employer ID (opsional)</span>
             <input
               value={employerId}
               onChange={(e) => setEmployerId(e.target.value)}
@@ -185,9 +176,7 @@ export default function AdminEmployersJobsPage() {
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-gray-500">
-                  Belum ada data
-                </td>
+                <td colSpan={8} className="p-6 text-center text-gray-500">Belum ada data</td>
               </tr>
             )}
 
@@ -200,11 +189,7 @@ export default function AdminEmployersJobsPage() {
                 <td className="p-3">{j.employerId || "-"}</td>
                 <td className="p-3 text-gray-500">{fmtDate(j.postedAt)}</td>
                 <td className="p-3">
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs ${
-                      j.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
+                  <span className={`rounded-full px-2 py-1 text-xs ${j.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-700"}`}>
                     {j.isActive ? "aktif" : "nonaktif"}
                   </span>
                 </td>
@@ -228,6 +213,7 @@ export default function AdminEmployersJobsPage() {
                 </td>
               </tr>
             ))}
+
           </tbody>
         </table>
       </div>

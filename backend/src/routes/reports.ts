@@ -1,22 +1,25 @@
 // backend/src/routes/reports.ts
 import { Router } from "express";
-import { prisma } from "../lib/prisma";
-import { Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
+const prisma = new PrismaClient();
 const router = Router();
 
-/**
- * POST /api/reports
- * Body: { judul: string, perusahaan: string, alasan?: string, catatan?: string }
- */
+/** CREATE report */
 router.post("/", async (req, res) => {
   try {
-    const { judul, perusahaan, alasan, catatan } = req.body ?? {};
+    const { judul, perusahaan, alasan, catatan } = (req.body ?? {}) as {
+      judul?: string;
+      perusahaan?: string;
+      alasan?: string;
+      catatan?: string;
+    };
+
     if (!judul || !perusahaan) {
-      return res.status(400).json({ ok: false, error: "judul & perusahaan wajib diisi" });
+      return res.status(400).json({ error: "judul & perusahaan wajib" });
     }
 
-    const report = await prisma.report.create({
+    const created = await prisma.report.create({
       data: {
         judul,
         perusahaan,
@@ -26,30 +29,29 @@ router.post("/", async (req, res) => {
       },
     });
 
-    return res.status(201).json({ ok: true, data: report });
+    res.status(201).json(created);
   } catch (e: any) {
-    console.error("[POST /api/reports] error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal Server Error" });
+    console.error("[reports] POST / error:", e);
+    res.status(500).json({ error: e?.message || "Internal error" });
   }
 });
 
-/**
- * GET /api/reports
- * Query: ?q=<string> (optional filter)
- */
+/** LIST reports (optional: ?q=) */
 router.get("/", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
 
+    // ⬇️ ketik eksplisit sebagai Prisma.ReportWhereInput
     let where: Prisma.ReportWhereInput = {};
+
     if (q) {
       where = {
         OR: [
-          { judul: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { judul:      { contains: q, mode: Prisma.QueryMode.insensitive } },
           { perusahaan: { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { alasan: { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { catatan: { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { status: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { alasan:     { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { catatan:    { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { status:     { contains: q, mode: Prisma.QueryMode.insensitive } },
         ],
       };
     }
@@ -59,47 +61,40 @@ router.get("/", async (req, res) => {
       orderBy: { dibuatPada: "desc" }, // pastikan kolom ini ada di schema
     });
 
-    return res.json({ ok: true, data: items });
+    res.json(items);
   } catch (e: any) {
-    console.error("[GET /api/reports] error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal Server Error" });
+    console.error("[reports] GET / error:", e);
+    res.status(500).json({ error: e?.message || "Internal error" });
   }
 });
 
-/**
- * PATCH /api/reports/:id
- * Body: { status?: string }
- */
+/** UPDATE status */
 router.patch("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body ?? {};
-
-    if (!status) return res.status(400).json({ ok: false, error: "status wajib diisi" });
+    const { id } = req.params as { id: string };
+    const { status } = (req.body ?? {}) as { status?: string };
 
     const updated = await prisma.report.update({
       where: { id },
       data: { status },
     });
 
-    return res.json({ ok: true, data: updated });
+    res.json(updated);
   } catch (e: any) {
-    console.error("[PATCH /api/reports/:id] error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal Server Error" });
+    console.error("[reports] PATCH /:id error:", e);
+    res.status(500).json({ error: e?.message || "Internal error" });
   }
 });
 
-/**
- * DELETE /api/reports/:id
- */
+/** DELETE report */
 router.delete("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     await prisma.report.delete({ where: { id } });
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (e: any) {
-    console.error("[DELETE /api/reports/:id] error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal Server Error" });
+    console.error("[reports] DELETE /:id error:", e);
+    res.status(500).json({ error: e?.message || "Internal error" });
   }
 });
 

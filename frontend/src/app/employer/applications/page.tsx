@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Nav from '@/components/nav';
 import Footer from '@/components/Footer';
 
@@ -40,6 +40,7 @@ export default function EmployerApplicationsPage() {
   const [counters, setCounters] = useState<Counters>(EMPTY_COUNTERS);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
 
   async function load() {
     setLoading(true);
@@ -54,7 +55,7 @@ export default function EmployerApplicationsPage() {
 
       const res = await fetch(u.toString(), {
         credentials: 'include',
-        headers: { 'X-Employer-Id': employerId }, // kalau middlewaremu tidak butuh header ini, tidak apa-apa ada
+        headers: { 'X-Employer-Id': employerId },
       });
 
       const json = await res.json().catch(() => ({}));
@@ -96,10 +97,75 @@ export default function EmployerApplicationsPage() {
   const cvHref = (partial?: string | null) => {
     if (!partial) return '#';
     const base = (API || '').replace(/\/+$/, '');
-    // Kalau partial sudah absolute (http...), biarkan
     if (/^https?:\/\//i.test(partial)) return partial;
     return `${base}${partial.startsWith('/') ? '' : '/'}${partial}`;
   };
+
+  // Hitung ulang counters lokal saat kita melakukan optimistic update
+  const recomputeCounters = (list: AppRow[]): Counters => {
+    const c = { ...EMPTY_COUNTERS };
+    for (const r of list) {
+      if (r.status in c) {
+        // @ts-ignore
+        c[r.status] += 1;
+      }
+    }
+    return c;
+  };
+
+  // Update status (optimistic). Sesuaikan endpoint jika backend Anda berbeda.
+  const updateStatus = async (id: string, newStatus: AppRow['status']) => {
+    const base = (API || '').replace(/\/+$/, '');
+    const employerId = localStorage.getItem('ark_employer_id') || '';
+
+    // Simpan snapshot untuk rollback jika gagal
+    const before = rows;
+    const next = rows.map((r) => (r.id === id ? { ...r, status: newStatus } : r));
+    setRows(next);
+    setCounters(recomputeCounters(next));
+    setSavingIds((m) => ({ ...m, [id]: true }));
+    setErr(null);
+
+    try {
+      const res = await fetch(`${base}/api/employers/applications/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Employer-Id': employerId,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      // opsi: refresh data dari server untuk sinkron
+      // await load();
+    } catch (e: any) {
+      // rollback
+      setRows(before);
+      setCounters(recomputeCounters(before));
+      setErr(e?.message || 'Gagal memperbarui status');
+    } finally {
+      setSavingIds((m) => ({ ...m, [id]: false }));
+    }
+  };
+
+  const onAccept = (row: AppRow) => {
+    if (!confirm(`Terima pelamar "${row.candidateName}" untuk posisi ${row.jobTitle}?`)) return;
+    updateStatus(row.id, 'hired');
+  };
+
+  const onReject = (row: AppRow) => {
+    if (!confirm(`Tolak pelamar "${row.candidateName}" untuk posisi ${row.jobTitle}?`)) return;
+    updateStatus(row.id, 'rejected');
+  };
+
+  // Tambahan: dropdown cepat ke status lain
+  const otherStatuses: AppRow['status'][] = ['submitted', 'review', 'shortlist', 'rejected', 'hired'];
 
   return (
     <>
@@ -137,12 +203,13 @@ export default function EmployerApplicationsPage() {
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">CV</th>
+                  <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-600">
                       Loading…
                     </td>
                   </tr>
@@ -150,8 +217,8 @@ export default function EmployerApplicationsPage() {
 
                 {!loading && err && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-rose-600">
-                      Error: {err}{' '}
+                    <td colSpan={7} className="px-4 py-8 text-center">
+                      <span className="text-rose-600">Error: {err}</span>{' '}
                       {/^HTTP 401/.test(err) && (
                         <span className="text-slate-600">
                           – Kamu perlu login sebagai employer.{' '}
@@ -164,39 +231,77 @@ export default function EmployerApplicationsPage() {
 
                 {!loading && !err && rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-600">
                       Belum ada pelamar.
                     </td>
                   </tr>
                 )}
 
-                {!loading && !err && rows.map((r) => (
-                  <tr key={r.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 font-medium text-slate-900">{r.candidateName}</td>
-                    <td className="px-4 py-3 text-slate-700">{r.candidateEmail || '-'}</td>
-                    <td className="px-4 py-3 text-slate-700">{r.jobTitle}</td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{pretty(r.createdAt)}</td>
-                    <td className="px-4 py-3">
-                      {r.cv ? (
-                        <a
-                          href={cvHref(r.cv.url)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-700 underline"
-                        >
-                          {r.cv.name || 'CV'}
-                        </a>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {!loading && !err && rows.map((r) => {
+                  const saving = !!savingIds[r.id];
+                  return (
+                    <tr key={r.id} className="border-b last:border-0">
+                      <td className="px-4 py-3 font-medium text-slate-900">{r.candidateName}</td>
+                      <td className="px-4 py-3 text-slate-700">{r.candidateEmail || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700">{r.jobTitle}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{pretty(r.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        {r.cv ? (
+                          <a
+                            href={cvHref(r.cv.url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-700 underline"
+                          >
+                            {r.cv.name || 'CV'}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => onAccept(r)}
+                            disabled={saving}
+                            className={`rounded-full px-3 py-1 text-xs font-medium text-white ${saving ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'} disabled:opacity-60`}
+                            title="Terima (ubah status ke HIRED)"
+                          >
+                            {saving ? 'Menyimpan…' : 'Terima'}
+                          </button>
+                          <button
+                            onClick={() => onReject(r)}
+                            disabled={saving}
+                            className={`rounded-full px-3 py-1 text-xs font-medium text-white ${saving ? 'bg-rose-400' : 'bg-rose-600 hover:bg-rose-700'} disabled:opacity-60`}
+                            title="Tolak (ubah status ke REJECTED)"
+                          >
+                            Tolak
+                          </button>
+
+                          {/* Optional: Quick change ke status lain */}
+                          <select
+                            value={r.status}
+                            disabled={saving}
+                            onChange={(e) => updateStatus(r.id, e.target.value as AppRow['status'])}
+                            className="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                            title="Ubah status cepat"
+                          >
+                            {otherStatuses.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -4,61 +4,146 @@ import { useAuth } from '@/hooks/useAuth';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+type Status = 'submitted' | 'review' | 'shortlist' | 'rejected' | 'hired';
+
 type AppRow = {
   jobId: string | number;
   title: string;
   location: string;
-  date: string; // ISO/string
-  status?: 'submitted' | 'review' | 'shortlist' | 'rejected';
+  appliedAt: string; // selalu string ISO di UI
+  status: Status;
 };
+
+const API =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:4000';
 
 export default function Applications() {
   const { user } = useAuth();
   const [rows, setRows] = useState<AppRow[]>([]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<'new' | 'old'>('new');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   // Redirect jika belum login
   useEffect(() => {
-    if (!user) {
+    if (user === null) {
       window.location.href = '/auth/signin';
     }
   }, [user]);
 
-  // Load data dari localStorage
   useEffect(() => {
     if (!user?.email) return;
-
-    try {
-      const appsByUser = JSON.parse(localStorage.getItem('ark_apps') ?? '{}')[user.email] ?? [];
-      const jobs: any[] = JSON.parse(localStorage.getItem('ark_jobs') ?? '[]');
-
-      const r: AppRow[] = appsByUser.map((a: any) => {
-        const j = jobs.find((jj) => jj.id === a.jobId);
-        const fallbackTitle = `Job ${a.jobId}`;
-        const fallbackLoc = j?.location ?? '-';
-
-        // status dummy (kalau belum ada di data, gunakan review)
-        const status: AppRow['status'] =
-          a.status ?? (Math.random() < 0.1 ? 'shortlist' : Math.random() < 0.15 ? 'rejected' : 'review');
-
-        return {
-          jobId: a.jobId,
-          title: j?.title ?? fallbackTitle,
-          location: fallbackLoc,
-          date: a.date ?? new Date().toISOString(),
-          status,
-        };
-      });
-
-      setRows(r);
-    } catch (e) {
-      console.error('Failed to parse localStorage:', e);
-      setRows([]);
-    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
-  if (!user) return null;
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const data = await fetchUserApplications();
+      setRows(data);
+      writeNewLocal(user?.email, data);
+    } catch (e: any) {
+      // pastikan err disimpan sebagai STRING
+      const msg =
+        typeof e === 'string'
+          ? e
+          : e?.message ||
+            (e && typeof e === 'object' ? JSON.stringify(e) : 'Gagal memuat data dari server');
+      setErr(msg);
+
+      const fallback = readFromLocal(user?.email);
+      setRows(fallback);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchUserApplications(): Promise<AppRow[]> {
+    const base = (API || '').replace(/\/+$/, '');
+    const u = `${base}/api/users/applications`;
+
+    const res = await fetch(u, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' } as any,
+    });
+
+    // Bila server mengirim HTML/objek lain saat error, pastikan kita ubah jadi string
+    if (!res.ok) {
+      let text = '';
+      try {
+        const j = await res.json();
+        text = j?.error || `HTTP ${res.status}`;
+      } catch {
+        try {
+          text = await res.text();
+        } catch {
+          text = `HTTP ${res.status}`;
+        }
+      }
+      throw new Error(text);
+    }
+
+    // Normalisasi respons
+    const json: any = await res.json().catch(() => ({}));
+    const raw = Array.isArray(json?.rows) ? json.rows : Array.isArray(json?.data) ? json.data : null;
+
+    if (!Array.isArray(raw)) {
+      throw new Error('Format API tidak sesuai: rows tidak ditemukan');
+    }
+
+    const normalized: AppRow[] = raw.map((r: any) => ({
+      jobId: r.jobId ?? r.id ?? '',
+      title: r.title ?? r.jobTitle ?? `Job ${r.jobId ?? r.id ?? ''}`,
+      location: r.location ?? '-',
+      appliedAt: toIsoString(r.appliedAt ?? r.createdAt ?? new Date()),
+      status: normalizeStatus(r.status),
+    }));
+
+    return normalized;
+  }
+
+  function readFromLocal(email?: string | null): AppRow[] {
+    if (!email) return [];
+    try {
+      const map = JSON.parse(localStorage.getItem('ark_user_apps') ?? '{}');
+      const arr: any[] = Array.isArray(map[email]) ? map[email] : [];
+      return arr
+        .map((a) => ({
+          jobId: a.jobId,
+          title: a.title ?? `Job ${a.jobId}`,
+          location: a.location ?? '-',
+          appliedAt: toIsoString(a.appliedAt ?? a.date ?? new Date()),
+          status: normalizeStatus(a.status),
+        }))
+        .filter((x: AppRow) => !!x.jobId);
+    } catch {
+      return [];
+    }
+  }
+
+  function writeNewLocal(email?: string | null, data?: AppRow[]) {
+    if (!email || !data) return;
+    try {
+      const map = JSON.parse(localStorage.getItem('ark_user_apps') ?? '{}');
+      map[email] = data;
+      localStorage.setItem('ark_user_apps', JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  function normalizeStatus(s: any): Status {
+    const v = String(s || '').toLowerCase();
+    if (v === 'submitted' || v === 'review' || v === 'shortlist' || v === 'rejected' || v === 'hired') {
+      return v as Status;
+    }
+    return 'review';
+  }
 
   // Search + sort
   const filtered = useMemo(() => {
@@ -73,17 +158,40 @@ export default function Applications() {
       : rows.slice();
 
     base.sort((a, b) => {
-      const ta = new Date(a.date).getTime();
-      const tb = new Date(b.date).getTime();
+      const ta = new Date(a.appliedAt).getTime();
+      const tb = new Date(b.appliedAt).getTime();
       return sort === 'new' ? tb - ta : ta - tb;
     });
 
     return base;
   }, [rows, q, sort]);
 
+  if (!user) return null;
+
+  // PENTING: jangan pernah render object mentah sebagai child
+  const safeErr = typeof err === 'string' ? err : err ? JSON.stringify(err) : null;
+
   return (
     <div className="min-h-screen bg-neutral-50 py-10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        {/* Error banner */}
+        {safeErr && (
+          <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-semibold">Perhatian</div>
+                <div className="text-sm break-words">{safeErr}</div>
+              </div>
+              <button
+                onClick={load}
+                className="rounded-xl bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 active:translate-y-[1px]"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Hero / Header */}
         <div className="mb-8 overflow-hidden rounded-3xl border border-neutral-200 bg-gradient-to-br from-neutral-900 to-neutral-700 p-6 text-white shadow-sm">
           <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
@@ -162,7 +270,9 @@ export default function Applications() {
 
         {/* Table / List */}
         <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="px-6 py-16 text-center text-neutral-600">Memuat…</div>
+          ) : filtered.length === 0 ? (
             <EmptyState />
           ) : (
             <div className="overflow-x-auto">
@@ -183,9 +293,9 @@ export default function Applications() {
                         <div className="mt-0.5 text-xs text-neutral-500">ID: {String(r.jobId)}</div>
                       </Td>
                       <Td className="text-neutral-700">{r.location}</Td>
-                      <Td className="text-neutral-700">{formatDate(r.date)}</Td>
+                      <Td className="text-neutral-700">{formatDate(r.appliedAt)}</Td>
                       <Td>
-                        <StatusBadge status={r.status ?? 'review'} />
+                        <StatusBadge status={r.status} />
                       </Td>
                     </tr>
                   ))}
@@ -201,7 +311,7 @@ export default function Applications() {
                         <div className="max-w-[240px] truncate font-medium text-neutral-900">{r.title}</div>
                         <div className="mt-1 text-xs text-neutral-500">ID: {String(r.jobId)}</div>
                       </div>
-                      <StatusBadge status={r.status ?? 'review'} />
+                      <StatusBadge status={r.status} />
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-600">
                       <div>
@@ -210,7 +320,7 @@ export default function Applications() {
                       </div>
                       <div>
                         <div className="text-neutral-400">Applied On</div>
-                        <div className="mt-0.5">{formatDate(r.date)}</div>
+                        <div className="mt-0.5">{formatDate(r.appliedAt)}</div>
                       </div>
                     </div>
                   </div>
@@ -222,7 +332,7 @@ export default function Applications() {
 
         {/* Footer note */}
         <p className="mt-6 text-center text-xs text-neutral-500">
-          Data lamaran disimpan lokal untuk demo. Beberapa status ditandai otomatis.
+          Data lamaran disimpan lokal untuk demo bila server tidak tersedia.
         </p>
       </div>
     </div>
@@ -271,26 +381,34 @@ function Td({ children, className = '' }: { children: React.ReactNode; className
   return <td className={`whitespace-nowrap px-6 py-4 ${className}`}>{children}</td>;
 }
 
-function StatusBadge({ status }: { status: NonNullable<AppRow['status']> }) {
-  const map: Record<
-    NonNullable<AppRow['status']>,
-    { text: string; cls: string }
-  > = {
+function StatusBadge({ status }: { status: Status }) {
+  const map: Record<Status, { text: string; cls: string }> = {
     submitted: { text: 'Submitted', cls: 'bg-blue-100 text-blue-700' },
     review: { text: 'Under Review', cls: 'bg-amber-100 text-amber-800' },
     shortlist: { text: 'Shortlisted', cls: 'bg-emerald-100 text-emerald-700' },
-    rejected: { text: 'Rejected', cls: 'bg-rose-100 text-rose-700' }
+    rejected: { text: 'Rejected', cls: 'bg-rose-100 text-rose-700' },
+    hired: { text: 'Hired', cls: 'bg-indigo-100 text-indigo-700' },
   };
 
   const { text, cls } = map[status] ?? map.review;
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{text}</span>;
 }
 
+/* ---------- helpers ---------- */
+function toIsoString(x: any): string {
+  try {
+    if (typeof x === 'string') return new Date(x).toISOString();
+    if (x instanceof Date) return x.toISOString();
+    return new Date(x).toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 function formatDate(s: string) {
   const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
+  if (Number.isNaN(d.getTime())) return String(s);
 
-  // relative dalam 30 hari terakhir
   const diff = Date.now() - d.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   if (days < 1) {
@@ -303,10 +421,9 @@ function formatDate(s: string) {
   }
   if (days < 30) return `${days} hari lalu`;
 
-  // fallback absolut
   return new Intl.DateTimeFormat(undefined, {
     year: 'numeric',
     month: 'short',
-    day: '2-digit'
+    day: '2-digit',
   }).format(d);
 }

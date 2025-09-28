@@ -1,10 +1,11 @@
 import { Router } from "express";
-import prisma from "../utils/prisma";
-import { Prisma } from "@prisma/client";
+import { prisma } from "../lib/prisma";
+import { mapJobToDTO } from "../utils/job-dto";
+import type { Prisma } from "@prisma/client";
 
-export const jobsRouter = Router();
+const router = Router();
 
-// Type helper untuk include employer + profile.logoUrl
+/** ===== Type helper: Job + employer(displayName, profile.logoUrl) ===== */
 type JobWithEmployer = Prisma.JobGetPayload<{
   include: {
     employer: {
@@ -19,14 +20,23 @@ type JobWithEmployer = Prisma.JobGetPayload<{
 /**
  * GET /api/jobs
  * Query:
- *  - active=1 => hanya job aktif (isActive true & isDraft false)
+ *  - active=1 => hanya job aktif (dan bukan draft)
+ *  - employerId=uuid => filter per employer
  */
-jobsRouter.get("/jobs", async (req, res) => {
+router.get("/jobs", async (req, res) => {
   try {
-    const onlyActive = String(req.query.active ?? "") === "1";
+    const active = String(req.query.active ?? "");
+    const employerId = typeof req.query.employerId === "string" ? req.query.employerId.trim() : "";
 
-    const jobs = await prisma.job.findMany({
-      where: onlyActive ? { isActive: true, isDraft: false } : undefined,
+    const where: Prisma.JobWhereInput = {};
+    if (active === "1") {
+      where.isActive = true;
+      where.isDraft = false;
+    }
+    if (employerId) where.employerId = employerId;
+
+    const rows = await prisma.job.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       include: {
         employer: {
@@ -38,7 +48,7 @@ jobsRouter.get("/jobs", async (req, res) => {
       },
     });
 
-    const data = (jobs as JobWithEmployer[]).map((j) => ({
+    const data = (rows as JobWithEmployer[]).map((j) => ({
       id: j.id,
       title: j.title,
       location: j.location ?? "",
@@ -48,37 +58,38 @@ jobsRouter.get("/jobs", async (req, res) => {
       company: j.employer?.displayName ?? "Company",
       logoUrl: j.employer?.profile?.logoUrl ?? null,
       isActive: j.isActive,
+      isDraft: j.isDraft,
+      employerId: j.employerId,
+      salaryMin: j.salaryMin ?? null,
+      salaryMax: j.salaryMax ?? null,
+      currency: j.currency ?? "IDR",
+      requirements: j.requirements ?? null,
     }));
 
     return res.json({ ok: true, data });
   } catch (e: any) {
-    console.error("GET /api/jobs error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
+    console.error("[GET /api/jobs] error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Internal Server Error" });
   }
 });
 
 /**
  * GET /api/employer/jobs
- * Query: ?employerId=<UUID>
+ * Mengembalikan SEMUA job milik employer tsb (aktif/nonaktif), untuk panel admin employer.
  */
-jobsRouter.get("/employer/jobs", async (req, res) => {
+router.get("/employer/jobs", async (req, res) => {
   try {
-    const employerId = (req.query.employerId as string) || process.env.DEV_EMPLOYER_ID;
+    const employerId =
+      (typeof req.query.employerId === "string" ? req.query.employerId.trim() : "") ||
+      process.env.DEV_EMPLOYER_ID;
 
-    if (!employerId) {
-      return res.status(401).json({ ok: false, error: "employerId tidak tersedia" });
-    }
+    if (!employerId) return res.status(400).json({ ok: false, error: "employerId tidak tersedia" });
 
     const jobs = await prisma.job.findMany({
       where: { employerId },
       orderBy: { createdAt: "desc" },
       include: {
-        employer: {
-          select: {
-            displayName: true,
-            profile: { select: { logoUrl: true } },
-          },
-        },
+        employer: { select: { displayName: true, profile: { select: { logoUrl: true } } } },
       },
     });
 
@@ -93,20 +104,25 @@ jobsRouter.get("/employer/jobs", async (req, res) => {
       logoUrl: j.employer?.profile?.logoUrl ?? null,
       isActive: j.isActive,
       isDraft: j.isDraft,
+      employerId: j.employerId,
+      salaryMin: j.salaryMin ?? null,
+      salaryMax: j.salaryMax ?? null,
+      currency: j.currency ?? "IDR",
+      requirements: j.requirements ?? null,
     }));
 
     return res.json({ ok: true, data });
   } catch (e: any) {
-    console.error("GET /api/employer/jobs error:", e);
+    console.error("[GET /api/employer/jobs] error:", e);
     return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
   }
 });
 
 /**
  * POST /api/employer/jobs
- * Body: { title, location?, employment?, description?, isDraft?, employerId?, logoDataUrl? }
+ * Membuat job baru milik employer
  */
-jobsRouter.post("/employer/jobs", async (req, res) => {
+router.post("/employer/jobs", async (req, res) => {
   try {
     const {
       title,
@@ -116,19 +132,16 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
       isDraft,
       employerId: bodyEmployerId,
       logoDataUrl,
-    } = req.body || {};
+    } = req.body ?? {};
 
     if (!title || typeof title !== "string") {
       return res.status(400).json({ ok: false, error: "title wajib diisi" });
     }
 
-    // NOTE produksi: ambil dari session auth
-    const employerId = bodyEmployerId || process.env.DEV_EMPLOYER_ID;
-    if (!employerId) {
-      return res.status(401).json({ ok: false, error: "Tidak ada employerId (login dulu)" });
-    }
+    const employerId = (bodyEmployerId || process.env.DEV_EMPLOYER_ID) as string | undefined;
+    if (!employerId) return res.status(401).json({ ok: false, error: "Tidak ada employerId (login dulu)" });
 
-    // (opsional) update logo di profil employer dari base64 data URL
+    // opsional: simpan logo ke profile
     if (logoDataUrl && typeof logoDataUrl === "string") {
       await prisma.employer.update({
         where: { id: employerId },
@@ -156,7 +169,7 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
         location: location ?? null,
         employment: employment ?? null,
         isDraft: Boolean(isDraft),
-        isActive: !Boolean(isDraft), // bukan draft => aktif
+        isActive: !Boolean(isDraft),
       },
     });
 
@@ -165,17 +178,83 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
       data: {
         id: job.id,
         title: job.title,
-        location: job.location,
-        employment: job.employment,
-        description: job.description,
+        location: job.location ?? "",
+        employment: job.employment ?? "",
+        description: job.description ?? "",
         postedAt: job.createdAt.toISOString(),
         company: employer?.displayName ?? "Company",
         logoUrl: employer?.profile?.logoUrl ?? null,
         isActive: job.isActive,
+        isDraft: job.isDraft,
+        employerId,
       },
     });
   } catch (e: any) {
-    console.error("POST /api/employer/jobs error:", e);
+    console.error("[POST /api/employer/jobs] error:", e);
     return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
   }
 });
+
+/**
+ * PATCH /api/jobs/:id
+ * Update parsial (aktif/nonaktif, dll.)
+ */
+router.patch("/jobs/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      isActive,
+      isDraft,
+      title,
+      description,
+      location,
+      employment,
+      salaryMin,
+      salaryMax,
+      currency,
+      requirements,
+    } = req.body ?? {};
+
+    const data: Prisma.JobUpdateInput = {
+      updatedAt: new Date(),
+    };
+
+    if (typeof isActive === "boolean") data.isActive = isActive;
+    if (typeof isDraft === "boolean") data.isDraft = isDraft;
+    if (typeof title === "string") data.title = title;
+    if (typeof description === "string") data.description = description;
+    if (typeof location === "string") data.location = location;
+    if (typeof employment === "string") data.employment = employment;
+    if (typeof salaryMin === "number") data.salaryMin = salaryMin;
+    if (typeof salaryMax === "number") data.salaryMax = salaryMax;
+    if (typeof currency === "string") data.currency = currency;
+    if (typeof requirements === "string") data.requirements = requirements;
+
+    const updated = await prisma.job.update({
+      where: { id },
+      data,
+      include: { employer: { select: { displayName: true, profile: { select: { logoUrl: true } } } } },
+    });
+
+    return res.json({ ok: true, data: mapJobToDTO(updated as any) });
+  } catch (e: any) {
+    console.error("[PATCH /api/jobs/:id] error:", e);
+    return res.status(404).json({ ok: false, error: "Job not found" });
+  }
+});
+
+/**
+ * DELETE /api/jobs/:id
+ */
+router.delete("/jobs/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.job.delete({ where: { id } });
+    return res.status(204).end();
+  } catch (e: any) {
+    console.error("[DELETE /api/jobs/:id] error:", e);
+    return res.status(404).json({ ok: false, error: "Job not found" });
+  }
+});
+
+export default router;

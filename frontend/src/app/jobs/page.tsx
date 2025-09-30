@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
+import { listenJobsUpdated } from "@/lib/jobsSync"; // ⬅️ NEW: gunakan listener util
+import type { ReportDialogProps } from "@/app/admin/employers/jobs/_components/ReportDialog";
 
 /* ---------------- Server base ---------------- */
 const API_BASE =
@@ -11,10 +13,11 @@ const API_BASE =
   (process.env.NODE_ENV === "development" ? "http://localhost:4000" : "");
 
 /* -------- Report Dialog (dynamic supaya bukan RSC) -------- */
-const ReportDialog = dynamic(
-  () => import("@/app/admin/reports/ReportDialog"),
+const ReportDialog = dynamic<ReportDialogProps>(
+  () => import("@/app/admin/employers/jobs/_components/ReportDialog"),
   { ssr: false }
 );
+
 
 /* ---------------- Types ---------------- */
 type JobDTO = {
@@ -53,13 +56,9 @@ type Job = {
   education?: "SMA/SMK" | "D3" | "S1" | "S2" | "S3" | "Any";
 };
 
-/* ---------- Helpers (server normalizer saja) ---------- */
+/* ---------- Helpers ---------- */
 function isoStore(iso?: string): string {
-  try {
-    return new Date(iso ?? Date.now()).toISOString();
-  } catch {
-    return iso || "";
-  }
+  try { return new Date(iso ?? Date.now()).toISOString(); } catch { return iso || ""; }
 }
 function sortByPosted(a: Job, b: Job, newest = true) {
   const da = Date.parse(a.posted), db = Date.parse(b.posted);
@@ -187,16 +186,7 @@ export default function JobsPage() {
   const locale = useLocale();
 
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [filters, setFilters] = useState({
-    q: "",
-    loc: "",
-    industry: "",
-    contract: "",
-    func: "",
-    remote: "",
-    exp: "",
-    edu: "",
-  });
+  const [filters, setFilters] = useState({ q: "", loc: "", industry: "", contract: "", func: "", remote: "", exp: "", edu: "" });
   const [saved, setSaved] = useState<string[]>([]);
   const [applied, setApplied] = useState<string[]>([]);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
@@ -213,7 +203,7 @@ export default function JobsPage() {
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [isApplying, setIsApplying] = useState(false);
 
-  // toast simple
+  // toast
   const [toast, setToast] = useState<{type:"ok"|"err"; msg:string}|null>(null);
   const hideToastRef = useRef<number | null>(null);
   const showToast = (type:"ok"|"err", msg:string) => {
@@ -224,7 +214,7 @@ export default function JobsPage() {
 
   useEffect(() => () => { if (hideToastRef.current) window.clearTimeout(hideToastRef.current); }, []);
 
-  // Sinkronkan ark_current dari backend (cookie session user)
+  // sinkron user id dari cookie server → localStorage
   useEffect(() => {
     (async () => {
       const userIdFromCookie = await getCurrentUserId();
@@ -246,11 +236,10 @@ export default function JobsPage() {
       const apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
       const arr: { jobId: string }[] = apps[cur] ?? [];
       setApplied(arr.map((a) => String(a.jobId)));
-    } catch {
-      setApplied([]);
-    }
+    } catch { setApplied([]); }
   };
 
+  // ====== LOADER (mount/sort) ======
   useEffect(() => {
     const ac = new AbortController(); let alive = true;
 
@@ -265,7 +254,7 @@ export default function JobsPage() {
         }
         const opts: RequestInit = { credentials: "include", signal: ac.signal };
 
-        // 1) Semua job aktif (dari DB)
+        // ambil job aktif
         const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
         if (!alive) return;
 
@@ -275,21 +264,6 @@ export default function JobsPage() {
           const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
           setJobs(mapped);
           return;
-        }
-
-        // 2) Fallback: job milik employer login (opsional)
-        const eid = localStorage.getItem("ark_employer_id");
-        if (eid) {
-          const r2 = await fetch(`${base}/api/employer/jobs?employerId=${encodeURIComponent(eid)}`, opts);
-          if (!alive) return;
-
-          if (r2.ok) {
-            const j2 = await r2.json().catch(() => null);
-            const serverList2: JobDTO[] = Array.isArray(j2?.data) ? j2.data : [];
-            const mapped2 = normalizeServer(serverList2).sort((a, b) => sortByPosted(a, b, sort === "newest"));
-            setJobs(mapped2);
-            return;
-          }
         }
 
         setJobs([]);
@@ -303,25 +277,41 @@ export default function JobsPage() {
       }
     })();
 
-    try {
-      setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
-    } catch {}
-
+    try { setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String)); } catch {}
     refreshAppliedForCurrent();
 
     const onUpd = () => {
       refreshAppliedForCurrent();
-      try {
-        setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String));
-      } catch {}
+      try { setSaved(JSON.parse(localStorage.getItem("ark_saved_global") ?? "[]").map(String)); } catch {}
     };
     window.addEventListener("storage", onUpd);
 
-    return () => {
-      alive = false;
-      ac.abort();
-      window.removeEventListener("storage", onUpd);
-    };
+    return () => { alive = false; ac.abort(); window.removeEventListener("storage", onUpd); };
+  }, [sort]);
+
+  // ==== NEW: re-fetch ketika admin mengubah/hapus job (pakai listenJobsUpdated) ====
+  useEffect(() => {
+    const unsubscribe = listenJobsUpdated(() => {
+      const ac = new AbortController();
+      (async () => {
+        try {
+          setLoadErr(null);
+          const base = (API_BASE || "").replace(/\/+$/, "");
+          if (!base) return;
+          const opts: RequestInit = { credentials: "include", signal: ac.signal };
+          const r1 = await fetch(`${base}/api/jobs?active=1`, opts);
+          if (r1.ok) {
+            const j1 = await r1.json().catch(() => null);
+            const serverList: JobDTO[] = Array.isArray(j1?.data) ? j1.data : [];
+            const mapped = normalizeServer(serverList).sort((a, b) => sortByPosted(a, b, sort === "newest"));
+            setJobs(mapped);
+          }
+        } catch {}
+        setTimeout(() => ac.abort(), 15000);
+      })();
+    });
+
+    return () => unsubscribe();
   }, [sort]);
 
   const dateFmt = useMemo(
@@ -365,7 +355,7 @@ export default function JobsPage() {
 
   function openDetail(job: Job) {
     setDetailJob(job);
-    setCvFile(null);                   // reset CV tiap buka modal
+    setCvFile(null);
     setDetailOpen(true);
   }
 
@@ -374,31 +364,17 @@ export default function JobsPage() {
     if (!sel || isApplying) return;
 
     // Validasi CV
-    if (!file) {
-      showToast("err","Silakan pilih file CV (PDF).");
-      return;
-    }
-    if (file.type !== "application/pdf") {
-      showToast("err","CV harus PDF.");
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      showToast("err","Ukuran CV maksimal 2 MB.");
-      return;
-    }
+    if (!file) { showToast("err","Silakan pilih file CV (PDF)."); return; }
+    if (file.type !== "application/pdf") { showToast("err","CV harus PDF."); return; }
+    if (file.size > 2 * 1024 * 1024) { showToast("err","Ukuran CV maksimal 2 MB."); return; }
 
-    // pastikan tau user siapa dari cookie session
+    // pastikan tau user siapa
     let cur = localStorage.getItem("ark_current");
     if (!cur) {
       cur = await getCurrentUserId();
-      if (cur) {
-        try { localStorage.setItem("ark_current", cur); } catch {}
-      }
+      if (cur) { try { localStorage.setItem("ark_current", cur); } catch {} }
     }
-    if (!cur) {
-      showToast("err","Silakan login terlebih dahulu untuk melamar.");
-      return;
-    }
+    if (!cur) { showToast("err","Silakan login terlebih dahulu untuk melamar."); return; }
 
     const base = (API_BASE || "").replace(/\/+$/, "");
     setIsApplying(true);
@@ -410,12 +386,7 @@ export default function JobsPage() {
         fd.set("jobId", String(sel.id));
         fd.set("cv", file);
 
-        const res = await fetch(`${base}/api/applications`, {
-          method: "POST",
-          credentials: "include",
-          body: fd,
-        });
-
+        const res = await fetch(`${base}/api/applications`, { method: "POST", credentials: "include", body: fd });
         if (!res.ok) {
           const err = await res.json().catch(() => ({} as any));
           throw new Error(err?.error || `Server ${res.status}`);
@@ -434,9 +405,7 @@ export default function JobsPage() {
     try {
       apps = JSON.parse(localStorage.getItem("ark_apps") ?? "{}");
       if (!apps || typeof apps !== "object") throw new Error("invalid ark_apps");
-    } catch {
-      apps = {};
-    }
+    } catch { apps = {}; }
 
     const jobId = String(sel.id);
     const userArr = Array.isArray(apps[cur]) ? apps[cur] : [];
@@ -789,7 +758,7 @@ function DetailModal({
               </Section>
             ) : null}
 
-            {/* ==== NEW: Upload CV ==== */}
+            {/* ==== Upload CV ==== */}
             <Section title="Unggah CV (PDF, maks 2 MB)">
               <div className="flex items-center gap-3">
                 <input

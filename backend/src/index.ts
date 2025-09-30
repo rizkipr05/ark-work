@@ -24,6 +24,12 @@ import ratesRouter from './routes/rates';
 import applicationsRouter from './routes/applications';
 import employerApplicationsRouter from './routes/employer-applications';
 
+// Admin Jobs router
+import adminJobsRouter from './routes/admin-jobs';
+
+// ⬅️ DEV auth helper router (meng-handle /auth/me dev dsb.)
+import authDev from './routes/auth-dev';
+
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
 
 const app = express();
@@ -111,15 +117,20 @@ app.use((_req, res, next) => {
 app.use((req, _res, next) => { console.log(`${req.method} ${req.originalUrl}`); next(); });
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
-/* Health */
+/* ========= HEALTH ========= */
 app.get('/', (_req, res) => res.send('OK'));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, status: 'healthy' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true })); // alias
+
+/* ========= DEV AUTH ROUTER =========
+   Penting: pasang SEBELUM router lain/guard agar endpoint dev auth tersedia awal. */
+app.use(authDev);
 
 /* ================= ROUTES (ORDER MATTERS!) ================= */
 /* Spesifik dulu supaya tidak ketimpa prefix lain */
+
 // Employer Applications (list & patch)
-// Router di dalamnya pakai path relatif ('/' dan '/:id'), jadi mount di prefix target:
 app.use('/api/employers/applications', employerApplicationsRouter);
 
 /* Auth kandidat/user */
@@ -142,16 +153,15 @@ app.use('/admin/tenders', adminTendersRouter);
 app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
 
-/* Jobs API */
+/* Jobs API (publik) */
 app.use('/api', jobsRouter);
 
-/* Applications API (user apply &/atau my applications)
-   NOTE: kalau di file router `routes/applications.ts` kamu punya path seperti:
-   - GET '/users/applications'
-   - POST '/apply'
-   maka mount di '/api' seperti ini sudah pas.
-   Jika router itu hanya punya path relatif '/', ganti ke: app.use('/api/applications', applicationsRouter);
-*/
+app.use("/api", adminJobsRouter);
+
+/* Admin Jobs API */
+app.use('/api/admin', adminJobsRouter);
+
+/* Applications API (user apply, dsb.) */
 app.use('/api', applicationsRouter);
 
 /* Protected examples */

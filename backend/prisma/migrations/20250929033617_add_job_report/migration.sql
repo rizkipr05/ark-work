@@ -5,6 +5,7 @@
   - You are about to drop the `jobs` table. If the table is not empty, all the data it contains will be lost.
 
 */
+
 -- CreateEnum
 CREATE TYPE "public"."ReportReason" AS ENUM ('SCAM', 'PHISHING', 'DUPLICATE', 'MISLEADING', 'OTHER');
 
@@ -27,7 +28,7 @@ ALTER TABLE "public"."saved_jobs" DROP CONSTRAINT "saved_jobs_jobId_fkey";
 ALTER TABLE "public"."Tender" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP;
 
 -- AlterTable
-ALTER TABLE "public"."employers" ADD COLUMN     "blockedAt" TIMESTAMP(3);
+ALTER TABLE "public"."employers" ADD COLUMN "blockedAt" TIMESTAMP(3);
 
 -- DropTable
 DROP TABLE "public"."Report";
@@ -37,46 +38,46 @@ DROP TABLE "public"."jobs";
 
 -- CreateTable
 CREATE TABLE "public"."Job" (
-    "id" UUID NOT NULL,
-    "employerId" UUID NOT NULL,
-    "title" TEXT NOT NULL,
-    "description" TEXT,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "isDraft" BOOLEAN NOT NULL DEFAULT false,
-    "isHidden" BOOLEAN NOT NULL DEFAULT false,
-    "hiddenReason" TEXT,
-    "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "salary_min" INTEGER,
-    "salary_max" INTEGER,
-    "currency" TEXT DEFAULT 'IDR',
-    "remote_mode" "public"."RemoteMode" DEFAULT 'ON_SITE',
-    "exp_min_years" INTEGER,
-    "education" "public"."Education",
-    "deadline" TIMESTAMP(3),
-    "tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
-    "requirements" TEXT,
+  "id" UUID NOT NULL,
+  "employerId" UUID NOT NULL,
+  "title" TEXT NOT NULL,
+  "description" TEXT,
+  "isActive" BOOLEAN NOT NULL DEFAULT true,
+  "isDraft" BOOLEAN NOT NULL DEFAULT false,
+  "isHidden" BOOLEAN NOT NULL DEFAULT false,
+  "hiddenReason" TEXT,
+  "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "salary_min" INTEGER,
+  "salary_max" INTEGER,
+  "currency" TEXT DEFAULT 'IDR',
+  "remote_mode" "public"."RemoteMode" DEFAULT 'ON_SITE',
+  "exp_min_years" INTEGER,
+  "education" "public"."Education",
+  "deadline" TIMESTAMP(3),
+  "tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
+  "requirements" TEXT,
 
-    CONSTRAINT "Job_pkey" PRIMARY KEY ("id")
+  CONSTRAINT "Job_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- CreateTable (FIXED TYPES)
 CREATE TABLE "public"."JobReport" (
-    "id" TEXT NOT NULL,
-    "jobId" TEXT NOT NULL,
-    "reporterUserId" TEXT,
-    "reporterEmail" TEXT,
-    "reason" "public"."ReportReason" NOT NULL,
-    "details" TEXT,
-    "evidenceUrl" TEXT,
-    "status" "public"."ReportStatus" NOT NULL DEFAULT 'OPEN',
-    "action" "public"."ReportAction" NOT NULL DEFAULT 'NONE',
-    "resolvedById" TEXT,
-    "resolvedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "id" UUID NOT NULL,
+  "jobId" UUID NOT NULL,
+  "reporterUserId" TEXT,
+  "reporterEmail" TEXT,
+  "reason" "public"."ReportReason" NOT NULL,
+  "details" TEXT,
+  "evidenceUrl" TEXT,
+  "status" "public"."ReportStatus" NOT NULL DEFAULT 'OPEN',
+  "action" "public"."ReportAction" NOT NULL DEFAULT 'NONE',
+  "resolvedById" TEXT,
+  "resolvedAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "JobReport_pkey" PRIMARY KEY ("id")
+  CONSTRAINT "JobReport_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -92,13 +93,25 @@ CREATE INDEX "JobReport_jobId_status_idx" ON "public"."JobReport"("jobId", "stat
 CREATE INDEX "JobReport_status_createdAt_idx" ON "public"."JobReport"("status", "createdAt");
 
 -- AddForeignKey
-ALTER TABLE "public"."Job" ADD CONSTRAINT "Job_employerId_fkey" FOREIGN KEY ("employerId") REFERENCES "public"."employers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."Job"
+  ADD CONSTRAINT "Job_employerId_fkey"
+  FOREIGN KEY ("employerId") REFERENCES "public"."employers"("id")
+  ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."job_applications" ADD CONSTRAINT "job_applications_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "public"."job_applications"
+  ADD CONSTRAINT "job_applications_jobId_fkey"
+  FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id")
+  ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."saved_jobs" ADD CONSTRAINT "saved_jobs_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "public"."saved_jobs"
+  ADD CONSTRAINT "saved_jobs_jobId_fkey"
+  FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id")
+  ON DELETE CASCADE ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "public"."JobReport" ADD CONSTRAINT "JobReport_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (FIXED TYPES)
+ALTER TABLE "public"."JobReport"
+  ADD CONSTRAINT "JobReport_jobId_fkey"
+  FOREIGN KEY ("jobId") REFERENCES "public"."Job"("id")
+  ON DELETE CASCADE ON UPDATE CASCADE;

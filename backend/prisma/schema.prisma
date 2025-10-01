@@ -247,18 +247,25 @@ model Payment {
  * ===================== Jobs =====================
  */
 model Job {
-  id                 String      @id @default(uuid()) @db.Uuid
-  employerId         String      @db.Uuid
-  employer           Employer    @relation(fields: [employerId], references: [id])
-  title              String
-  description        String?
-  isActive           Boolean     @default(true)
-  isDraft            Boolean     @default(false)
-  isHidden           Boolean     @default(false)
-  hiddenReason       String?
-  createdAt          DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
-  deletedAt          DateTime?
+  id         String   @id @default(uuid()) @db.Uuid
+  employerId String   @db.Uuid
+  employer   Employer @relation(fields: [employerId], references: [id])
+
+  title        String
+  description  String?
+  isActive     Boolean @default(true)
+  isDraft      Boolean @default(false)
+  isHidden     Boolean @default(false)
+  hiddenReason String?
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime?
+
+  // untuk FE
+  location   String?
+  employment String?
+
   salaryMin          Int?        @map("salary_min")
   salaryMax          Int?        @map("salary_max")
   currency           String?     @default("IDR")
@@ -409,29 +416,7 @@ model JobReport {
 
   @@index([jobId, status])
   @@index([status, createdAt])
-  @@map("job_reports")
-}
-
-enum ReportReason {
-  SCAM
-  PHISHING
-  DUPLICATE
-  MISLEADING
-  OTHER
-}
-
-enum ReportStatus {
-  OPEN
-  UNDER_REVIEW
-  DISMISSED
-  ACTION_TAKEN
-}
-
-enum ReportAction {
-  NONE
-  HIDE_JOB
-  DELETE_JOB
-  BLOCK_EMPLOYER
+  @@map("job_reports") // ganti/hapus jika nama tabel berbeda
 }
 
 /**
@@ -515,4 +500,29 @@ enum Education {
   S1
   S2
   S3
+}
+
+/**
+ * ====== Enums untuk JobReport (WAJIB, agar error P1012 hilang) ======
+ */
+enum ReportReason {
+  SCAM
+  PHISHING
+  DUPLICATE
+  MISLEADING
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  UNDER_REVIEW
+  DISMISSED
+  ACTION_TAKEN
+}
+
+enum ReportAction {
+  NONE
+  HIDE_JOB
+  DELETE_JOB
+  BLOCK_EMPLOYER
 }

@@ -7,7 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/* ===================== User & Admin ===================== */
+/**
+ * ===================== User & Admin =====================
+ */
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -31,7 +33,9 @@ model Admin {
   updatedAt    DateTime @default(now()) @updatedAt
 }
 
-/* ===================== Tender ===================== */
+/**
+ * ===================== Tender =====================
+ */
 model Tender {
   id          Int      @id @default(autoincrement())
   title       String
@@ -49,30 +53,32 @@ model Tender {
   budgetUSD   BigInt   @map("budget_usd")
 }
 
-/* ===================== Employer ===================== */
+/**
+ * ===================== Employer =====================
+ */
 model Employer {
-  id             String                @id @default(uuid()) @db.Uuid
-  slug           String                @unique
-  legalName      String                @map("legal_name")
-  displayName    String                @map("display_name")
+  id             String         @id @default(uuid()) @db.Uuid
+  slug           String         @unique
+  legalName      String         @map("legal_name")
+  displayName    String         @map("display_name")
   website        String?
-  status         EmployerStatus        @default(draft)
-  isVerified     Boolean               @default(false) @map("is_verified")
-  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  onboardingStep OnboardingStep        @default(PACKAGE) @map("onboarding_step")
+  status         EmployerStatus @default(draft)
+  isVerified     Boolean        @default(false) @map("is_verified")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  onboardingStep OnboardingStep @default(PACKAGE) @map("onboarding_step")
   blockedAt      DateTime?
 
-  admins         EmployerAdminUser[]
-  contacts       EmployerContact[]
-  metas          EmployerMeta[]
-  offices        EmployerOffice[]
-  profile        EmployerProfile?
-  jobs           Job[]
-  payments       Payment[]
-  sessions       Session[]
-  subscriptions  Subscription[]
-  verifications  VerificationRequest[]
+  admins        EmployerAdminUser[]
+  contacts      EmployerContact[]
+  metas         EmployerMeta[]
+  offices       EmployerOffice[]
+  profile       EmployerProfile?
+  jobs          Job[]
+  payments      Payment[]
+  sessions      Session[]
+  subscriptions Subscription[]
+  verifications VerificationRequest[]
 
   @@map("employers")
 }
@@ -163,7 +169,9 @@ model EmployerMeta {
   @@map("employer_meta")
 }
 
-/* ===================== Plans / Payments ===================== */
+/**
+ * ===================== Plans / Payments =====================
+ */
 model Plan {
   id            String         @id @default(uuid()) @db.Uuid
   slug          String         @unique
@@ -235,41 +243,43 @@ model Payment {
   @@map("payments")
 }
 
-/* ===================== Jobs ===================== */
+/**
+ * ===================== Jobs =====================
+ */
 model Job {
-  id                String            @id @default(uuid()) @db.Uuid
-  employerId        String            @db.Uuid
-  employer          Employer          @relation(fields: [employerId], references: [id])
-  title             String
-  description       String?
-  isActive          Boolean           @default(true)
-  isDraft           Boolean           @default(false)
-  isHidden          Boolean           @default(false)
-  hiddenReason      String?
-  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt         DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
-  deletedAt DateTime?
-  isHidden     Boolean   @default(false)
-  hiddenReason String?
-  salaryMin         Int?              @map("salary_min")
-  salaryMax         Int?              @map("salary_max")
-  currency          String?           @default("IDR")
-  remoteMode        RemoteMode?       @default(ON_SITE) @map("remote_mode")
-  experienceMinYears Int?             @map("exp_min_years")
-  education         Education?
-  deadline          DateTime?
-  tags              String[]          @default([])
-  requirements      String?
+  id                 String      @id @default(uuid()) @db.Uuid
+  employerId         String      @db.Uuid
+  employer           Employer    @relation(fields: [employerId], references: [id])
+  title              String
+  description        String?
+  isActive           Boolean     @default(true)
+  isDraft            Boolean     @default(false)
+  isHidden           Boolean     @default(false)
+  hiddenReason       String?
+  createdAt          DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
+  deletedAt          DateTime?
+  salaryMin          Int?        @map("salary_min")
+  salaryMax          Int?        @map("salary_max")
+  currency           String?     @default("IDR")
+  remoteMode         RemoteMode? @default(ON_SITE) @map("remote_mode")
+  experienceMinYears Int?        @map("exp_min_years")
+  education          Education?
+  deadline           DateTime?
+  tags               String[]    @default([])
+  requirements       String?
 
-  applications      JobApplication[]
-  savedBy           SavedJob[]
-  reports           JobReport[]
+  applications JobApplication[]
+  savedBy      SavedJob[]
+  reports      JobReport[]
 
   @@index([employerId, isActive])
   @@index([createdAt])
 }
 
-/* ===================== Verification ===================== */
+/**
+ * ===================== Verification =====================
+ */
 model VerificationRequest {
   id         String             @id @default(uuid()) @db.Uuid
   employerId String             @map("employer_id") @db.Uuid
@@ -308,7 +318,9 @@ model VerifyToken {
   @@map("verify_tokens")
 }
 
-/* ===================== Sessions ===================== */
+/**
+ * ===================== Sessions =====================
+ */
 model Session {
   id         String    @id @default(cuid())
   userId     String?
@@ -328,7 +340,9 @@ model Session {
   @@map("sessions")
 }
 
-/* ===================== Job Applications & Saved Jobs ===================== */
+/**
+ * ===================== Job Applications & Saved Jobs =====================
+ */
 enum ApplicationStatus {
   submitted
   review
@@ -345,10 +359,10 @@ model JobApplication {
   createdAt   DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
 
-  cvUrl       String?  @map("cv_url")
-  cvFileName  String?  @map("cv_file_name")
-  cvFileType  String?  @map("cv_file_type")
-  cvFileSize  Int?     @map("cv_file_size")
+  cvUrl      String? @map("cv_url")
+  cvFileName String? @map("cv_file_name")
+  cvFileType String? @map("cv_file_type")
+  cvFileSize Int?    @map("cv_file_size")
 
   job       Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
   applicant User @relation(fields: [applicantId], references: [id], onDelete: Cascade)
@@ -374,26 +388,28 @@ model SavedJob {
   @@map("saved_jobs")
 }
 
-/* ===================== Job Reporting ===================== */
+/**
+ * ===================== Job Reporting =====================
+ */
 model JobReport {
-  id             String        @id @default(uuid())
-  jobId          String        @db.Uuid       // <--- tambahkan @db.Uuid
-  job            Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid())
+  jobId          String       @db.Uuid
+  job            Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   reporterUserId String?
   reporterEmail  String?
   reason         ReportReason
   details        String?
   evidenceUrl    String?
-  status         ReportStatus  @default(OPEN)
-  action         ReportAction  @default(NONE)
+  status         ReportStatus @default(OPEN)
+  action         ReportAction @default(NONE)
   resolvedById   String?
   resolvedAt     DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @default(now()) @updatedAt
-}
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
 
   @@index([jobId, status])
   @@index([status, createdAt])
+  @@map("job_reports")
 }
 
 enum ReportReason {
@@ -418,7 +434,9 @@ enum ReportAction {
   BLOCK_EMPLOYER
 }
 
-/* ===================== Enums ===================== */
+/**
+ * ===================== Enums =====================
+ */
 enum Sector {
   OIL_GAS
   RENEWABLE_ENERGY
@@ -443,7 +461,7 @@ enum Contract {
   TURNKEY
   LOGISTICS
   DRILLING
-  O_M @map("O&M")
+  O_M         @map("O&M")
 }
 
 enum EmployerStatus {
@@ -451,6 +469,7 @@ enum EmployerStatus {
   active
   suspended
   archived
+
   @@map("employer_status")
 }
 
@@ -463,6 +482,7 @@ enum CompanySize {
   S1001_5000  @map("1001-5000")
   S5001_10000 @map("5001-10000")
   S10000_PLUS @map("10000+")
+
   @@map("company_size")
 }
 
@@ -470,6 +490,7 @@ enum VerificationStatus {
   pending
   approved
   rejected
+
   @@map("verification_status")
 }
 
@@ -478,6 +499,7 @@ enum OnboardingStep {
   JOB
   VERIFY
   DONE
+
   @@map("onboarding_step")
 }
 

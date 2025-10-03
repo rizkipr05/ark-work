@@ -1,100 +1,215 @@
-// backend/src/routes/reports.ts
-import { Router } from "express";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { Prisma, ReportReason, ReportStatus } from '@prisma/client';
 
-const prisma = new PrismaClient();
 const router = Router();
 
-/** CREATE report */
-router.post("/", async (req, res) => {
+/* -------------------------- Helpers -------------------------- */
+
+function mapStatusInput(s?: string): ReportStatus | undefined {
+  if (!s) return undefined;
+  const v = String(s).toLowerCase().trim();
+  // dukung label lokal & enum asli
+  if (v === 'baru' || v === 'open') return ReportStatus.OPEN;
+  if (v === 'proses' || v === 'under_review' || v === 'underreview' || v === 'review')
+    return ReportStatus.UNDER_REVIEW;
+  if (v === 'tutup' || v === 'selesai' || v === 'action_taken' || v === 'actiontaken')
+    return ReportStatus.ACTION_TAKEN;
+  if (v === 'abaikan' || v === 'dismissed') return ReportStatus.DISMISSED;
+  // kalau user sudah kirim enum valid, Prisma akan validasi
+  return (v as unknown) as ReportStatus;
+}
+
+function mapReasonInput(r?: string): ReportReason {
+  if (!r) return ReportReason.OTHER;
+  const v = String(r).toUpperCase().replace(/\s+/g, '_') as keyof typeof ReportReason;
+  return (ReportReason[v] ?? ReportReason.OTHER) as ReportReason;
+}
+
+/* -------------------------- CREATE -------------------------- */
+/**
+ * POST /api/reports
+ * Body (salah satu):
+ *  - { jobId, alasan?, catatan?, evidenceUrl?, reporterUserId?, reporterEmail? }
+ *  - { judul, perusahaan, alasan?, catatan?, ... } -> backend akan lookup jobId
+ */
+router.post('/', async (req: Request, res: Response) => {
   try {
-    const { judul, perusahaan, alasan, catatan } = (req.body ?? {}) as {
+    const {
+      jobId: rawJobId,
+      judul,
+      perusahaan,
+      alasan,
+      catatan,
+      evidenceUrl,
+      reporterUserId,
+      reporterEmail,
+    } = (req.body ?? {}) as {
+      jobId?: string;
       judul?: string;
       perusahaan?: string;
       alasan?: string;
       catatan?: string;
+      evidenceUrl?: string;
+      reporterUserId?: string;
+      reporterEmail?: string;
     };
 
-    if (!judul || !perusahaan) {
-      return res.status(400).json({ error: "judul & perusahaan wajib" });
+    let jobId = (rawJobId || '').trim();
+
+    // fallback cari job dari judul + perusahaan
+    if (!jobId && judul && perusahaan) {
+      const found = await prisma.job.findFirst({
+        where: {
+          title: judul,
+          employer: { displayName: perusahaan },
+        },
+        select: { id: true },
+      });
+      if (found) jobId = found.id;
     }
 
-    const created = await prisma.report.create({
+    if (!jobId) {
+      return res.status(400).json({ ok: false, error: 'jobId (atau judul+perusahaan) diperlukan' });
+    }
+
+    const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+    if (!job) return res.status(404).json({ ok: false, error: 'Job tidak ditemukan' });
+
+    const created = await prisma.jobReport.create({
       data: {
-        judul,
-        perusahaan,
-        alasan: alasan || "Lainnya",
-        catatan: catatan || "",
-        status: "baru",
+        jobId,
+        reason: mapReasonInput(alasan),
+        details: catatan ?? null,
+        evidenceUrl: evidenceUrl ?? null,
+        reporterUserId: reporterUserId ?? null,
+        reporterEmail: reporterEmail ?? null,
+      },
+      include: {
+        job: { select: { title: true, employer: { select: { displayName: true } } } },
       },
     });
 
-    res.status(201).json(created);
+    // bentuk yang FE admin harapkan
+    return res.status(201).json({
+      ok: true,
+      data: {
+        id: created.id,
+        judul: created.job?.title ?? '-',
+        perusahaan: created.job?.employer?.displayName ?? '-',
+        alasan: created.reason,
+        catatan: created.details ?? '',
+        status: created.status,
+        dibuat: created.createdAt.toISOString(),
+      },
+    });
   } catch (e: any) {
-    console.error("[reports] POST / error:", e);
-    res.status(500).json({ error: e?.message || "Internal error" });
+    console.error('[reports] POST / error:', e);
+    return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
 
-/** LIST reports (optional: ?q=) */
-router.get("/", async (req, res) => {
+/* ---------------------------- LIST --------------------------- */
+/**
+ * GET /api/reports?q=
+ * kembalikan shape yang dipakai tabel admin:
+ * { id, judul, perusahaan, alasan, catatan, status, dibuat }
+ */
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const q = String(req.query.q ?? "").trim();
+    const q = String(req.query.q ?? '').trim();
 
-    // ⬇️ ketik eksplisit sebagai Prisma.ReportWhereInput
-    let where: Prisma.ReportWhereInput = {};
-
+    let where: Prisma.JobReportWhereInput = {};
     if (q) {
       where = {
         OR: [
-          { judul:      { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { perusahaan: { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { alasan:     { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { catatan:    { contains: q, mode: Prisma.QueryMode.insensitive } },
-          { status:     { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { details: { contains: q, mode: 'insensitive' } },
+          { evidenceUrl: { contains: q, mode: 'insensitive' } },
+          { job: { title: { contains: q, mode: 'insensitive' } } },
+          {
+            job: {
+              employer: { displayName: { contains: q, mode: 'insensitive' } },
+            },
+          },
         ],
       };
     }
 
-    const items = await prisma.report.findMany({
+    const rows = await prisma.jobReport.findMany({
       where,
-      orderBy: { dibuatPada: "desc" }, // pastikan kolom ini ada di schema
+      orderBy: { createdAt: 'desc' },
+      include: {
+        job: { select: { title: true, employer: { select: { displayName: true } } } },
+      },
     });
 
-    res.json(items);
+    const data = rows.map((r) => ({
+      id: r.id,
+      judul: r.job?.title ?? '-',
+      perusahaan: r.job?.employer?.displayName ?? '-',
+      alasan: r.reason,
+      catatan: r.details ?? '',
+      status: r.status,
+      dibuat: r.createdAt?.toISOString?.() ?? new Date(r.createdAt).toISOString(),
+    }));
+
+    return res.json({ ok: true, data });
   } catch (e: any) {
-    console.error("[reports] GET / error:", e);
-    res.status(500).json({ error: e?.message || "Internal error" });
+    console.error('[reports] GET / error:', e);
+    return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
 
-/** UPDATE status */
-router.patch("/:id", async (req, res) => {
+/* --------------------------- UPDATE -------------------------- */
+/**
+ * PATCH /api/reports/:id
+ * Body: { status?: 'baru'|'proses'|'tutup'|'abaikan'|ReportStatus, catatan?: string }
+ */
+router.patch('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params as { id: string };
-    const { status } = (req.body ?? {}) as { status?: string };
+    const id = req.params.id;
+    const status = mapStatusInput(req.body?.status);
+    const details = typeof req.body?.catatan === 'string' ? (req.body.catatan as string) : undefined;
 
-    const updated = await prisma.report.update({
+    const updated = await prisma.jobReport.update({
       where: { id },
-      data: { status },
+      data: {
+        ...(status ? { status } : {}),
+        ...(details !== undefined ? { details } : {}),
+        updatedAt: new Date(),
+      },
+      include: {
+        job: { select: { title: true, employer: { select: { displayName: true } } } },
+      },
     });
 
-    res.json(updated);
+    return res.json({
+      ok: true,
+      data: {
+        id: updated.id,
+        judul: updated.job?.title ?? '-',
+        perusahaan: updated.job?.employer?.displayName ?? '-',
+        alasan: updated.reason,
+        catatan: updated.details ?? '',
+        status: updated.status,
+        dibuat: updated.createdAt.toISOString(),
+      },
+    });
   } catch (e: any) {
-    console.error("[reports] PATCH /:id error:", e);
-    res.status(500).json({ error: e?.message || "Internal error" });
+    console.error('[reports] PATCH /:id error:', e);
+    return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
 
-/** DELETE report */
-router.delete("/:id", async (req, res) => {
+/* --------------------------- DELETE -------------------------- */
+router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params as { id: string };
-    await prisma.report.delete({ where: { id } });
-    res.json({ ok: true });
+    const id = req.params.id;
+    await prisma.jobReport.delete({ where: { id } });
+    return res.json({ ok: true });
   } catch (e: any) {
-    console.error("[reports] DELETE /:id error:", e);
-    res.status(500).json({ error: e?.message || "Internal error" });
+    console.error('[reports] DELETE /:id error:', e);
+    return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
 

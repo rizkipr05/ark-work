@@ -6,10 +6,11 @@ import multer from 'multer';
 
 import { prisma } from '../lib/prisma';
 import { authRequired } from '../middleware/role';
+import { Prisma } from '@prisma/client';
 
 const router = Router();
 
-/* ========= Konfigurasi upload ========= */
+/* ========= Upload CV (PDF) ========= */
 const UP_DIR = path.join(process.cwd(), 'public', 'uploads', 'cv');
 fs.mkdirSync(UP_DIR, { recursive: true });
 
@@ -33,12 +34,7 @@ const upload = multer({
 });
 
 /**
- * ===========================================
- * GET /api/users/applications
- * Ambil daftar lamaran milik user yang login.
- * Guard: authRequired (mengisi req.auth.uid)
- * Response: { ok: true, rows: [{ jobId, title, location, appliedAt, status }] }
- * ===========================================
+ * GET /api/users/applications  (list aplikasi user login)
  */
 router.get('/users/applications', authRequired, async (req: Request, res: Response) => {
   try {
@@ -49,20 +45,36 @@ router.get('/users/applications', authRequired, async (req: Request, res: Respon
     const apps = await prisma.jobApplication.findMany({
       where: { applicantId: userId },
       orderBy: { createdAt: 'desc' },
-      select: {
-        jobId: true,
-        status: true,
-        createdAt: true,
-        job: { select: { title: true, location: true } },
+      include: {
+        job: {
+          select: {
+            id: true,
+            title: true,
+            location: true,   // Field ini ADA di schema kamu
+            employment: true, // Field ini ADA di schema kamu
+            employer: { select: { displayName: true } },
+          },
+        },
       },
     });
 
     const rows = apps.map((a) => ({
+      id: a.id,
       jobId: a.jobId,
       title: a.job?.title ?? `Job ${a.jobId}`,
       location: a.job?.location ?? '-',
-      appliedAt: a.createdAt, // FE expects 'appliedAt'
-      status: a.status,       // 'submitted' | 'review' | 'shortlist' | 'rejected' | 'hired'
+      employment: a.job?.employment ?? '-',
+      company: a.job?.employer?.displayName ?? 'Company',
+      appliedAt: a.createdAt,
+      status: a.status,
+      cv: a.cvUrl
+        ? {
+            url: a.cvUrl,
+            name: a.cvFileName,
+            type: a.cvFileType,
+            size: a.cvFileSize,
+          }
+        : null,
     }));
 
     return res.json({ ok: true, rows });
@@ -73,18 +85,14 @@ router.get('/users/applications', authRequired, async (req: Request, res: Respon
 });
 
 /**
- * ===========================================================
- * POST /api/applications
- * Body: multipart/form-data
- *  - jobId (string)
- *  - cv (file/pdf, optional)
- * Guard: authRequired (cookie user_token)
- * ===========================================================
+ * POST /api/applications   ← penting: path disamakan agar tidak 404
+ * Form-Data:
+ *   - jobId: string
+ *   - cv: (file pdf) opsional
  */
-router.post('/', authRequired, upload.single('cv'), async (req: Request, res: Response) => {
+router.post('/applications', authRequired, upload.single('cv'), async (req: Request, res: Response) => {
   try {
     const jobId = String(req.body?.jobId || '').trim();
-
     if (!jobId) {
       if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
       return res.status(400).json({ ok: false, error: 'jobId required' });
@@ -99,16 +107,15 @@ router.post('/', authRequired, upload.single('cv'), async (req: Request, res: Re
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },
-      select: { id: true, isActive: true, title: true },
+      select: { id: true, isActive: true, isHidden: true, title: true },
     });
-    if (!job || !job.isActive) {
+    if (!job || !job.isActive || job.isHidden) {
       if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
       return res.status(404).json({ ok: false, error: 'Job not found/active' });
     }
 
-    // siapkan metadata CV (jika ada file)
+    // Infos CV (jika ada)
     let cv: null | { url: string; name: string; type: string; size: number } = null;
-
     if (req.file) {
       cv = {
         url: `/uploads/cv/${req.file.filename}`,
@@ -118,35 +125,33 @@ router.post('/', authRequired, upload.single('cv'), async (req: Request, res: Re
       };
     }
 
-    // upsert lamaran (unik per user x job)
-    const result = await prisma.jobApplication.upsert({
+    // Type hasil upsert supaya .job terdeteksi
+    type AppWithJob = Prisma.JobApplicationGetPayload<{
+      include: { job: { select: { id: true; title: true } } };
+    }>;
+
+    const result: AppWithJob = await prisma.jobApplication.upsert({
       where: { jobId_applicantId: { jobId, applicantId: userId } },
       create: {
         jobId,
         applicantId: userId,
-        ...(cv
-          ? {
-              cvUrl: cv.url,
-              cvFileName: cv.name,
-              cvFileType: cv.type,
-              cvFileSize: cv.size,
-            }
-          : {}),
+        ...(cv ? {
+          cvUrl: cv.url,
+          cvFileName: cv.name,
+          cvFileType: cv.type,
+          cvFileSize: cv.size,
+        } : {}),
       },
       update: {
-        ...(cv
-          ? {
-              cvUrl: cv.url,
-              cvFileName: cv.name,
-              cvFileType: cv.type,
-              cvFileSize: cv.size,
-            }
-          : {}),
+        ...(cv ? {
+          cvUrl: cv.url,
+          cvFileName: cv.name,
+          cvFileType: cv.type,
+          cvFileSize: cv.size,
+        } : {}),
         updatedAt: new Date(),
       },
-      include: {
-        job: { select: { id: true, title: true } },
-      },
+      include: { job: { select: { id: true, title: true } } },
     });
 
     return res.json({
@@ -173,6 +178,10 @@ router.post('/', authRequired, upload.single('cv'), async (req: Request, res: Re
         return res.status(413).json({ ok: false, error: 'CV terlalu besar. Maks 2 MB.' });
       }
       return res.status(400).json({ ok: false, error: 'Upload CV gagal. Pastikan file PDF.' });
+    }
+    if (e?.code === 'P2002') {
+      // unique constraint (jobId, applicantId)
+      return res.status(409).json({ ok: false, error: 'Anda sudah melamar job ini' });
     }
     console.error('[POST /api/applications] error:', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR' });

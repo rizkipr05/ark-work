@@ -1,25 +1,12 @@
 import { Router } from "express";
-import prisma from "../utils/prisma";
+import { prisma } from "../lib/prisma"; // <-- samakan import
 import { Prisma } from "@prisma/client";
 
 export const jobsRouter = Router();
 
-// Type helper untuk include employer + profile.logoUrl
-type JobWithEmployer = Prisma.JobGetPayload<{
-  include: {
-    employer: {
-      select: {
-        displayName: true;
-        profile: { select: { logoUrl: true } };
-      };
-    };
-  };
-}>;
-
 /**
  * GET /api/jobs
- * Query:
- *  - active=1 => hanya job aktif (isActive true & isDraft false)
+ * ?active=1 => hanya job aktif (isActive true & isDraft false)
  */
 jobsRouter.get("/jobs", async (req, res) => {
   try {
@@ -28,7 +15,19 @@ jobsRouter.get("/jobs", async (req, res) => {
     const jobs = await prisma.job.findMany({
       where: onlyActive ? { isActive: true, isDraft: false } : undefined,
       orderBy: { createdAt: "desc" },
-      include: {
+      // Pakai SELECT eksplisit agar TS melihat field2 baru
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        createdAt: true,
+        isActive: true,
+        isDraft: true,
+
+        // kolom baru yang sering hilang di tipe cache TS
+        location: true,
+        employment: true,
+
         employer: {
           select: {
             displayName: true,
@@ -38,7 +37,7 @@ jobsRouter.get("/jobs", async (req, res) => {
       },
     });
 
-    const data = (jobs as JobWithEmployer[]).map((j) => ({
+    const data = jobs.map((j) => ({
       id: j.id,
       title: j.title,
       location: j.location ?? "",
@@ -53,26 +52,42 @@ jobsRouter.get("/jobs", async (req, res) => {
     return res.json({ ok: true, data });
   } catch (e: any) {
     console.error("GET /api/jobs error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
+    return res
+      .status(500)
+      .json({ ok: false, error: e?.message || "Internal error" });
   }
 });
 
 /**
  * GET /api/employer/jobs
- * Query: ?employerId=<UUID>
+ * ?employerId=<UUID>
  */
 jobsRouter.get("/employer/jobs", async (req, res) => {
   try {
-    const employerId = (req.query.employerId as string) || process.env.DEV_EMPLOYER_ID;
+    const employerId =
+      (req.query.employerId as string) || process.env.DEV_EMPLOYER_ID;
 
     if (!employerId) {
-      return res.status(401).json({ ok: false, error: "employerId tidak tersedia" });
+      return res
+        .status(401)
+        .json({ ok: false, error: "employerId tidak tersedia" });
     }
 
     const jobs = await prisma.job.findMany({
       where: { employerId },
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        createdAt: true,
+        isActive: true,
+        isDraft: true,
+
+        // kolom baru
+        location: true,
+        employment: true,
+
         employer: {
           select: {
             displayName: true,
@@ -82,7 +97,7 @@ jobsRouter.get("/employer/jobs", async (req, res) => {
       },
     });
 
-    const data = (jobs as JobWithEmployer[]).map((j) => ({
+    const data = jobs.map((j) => ({
       id: j.id,
       title: j.title,
       location: j.location ?? "",
@@ -98,7 +113,9 @@ jobsRouter.get("/employer/jobs", async (req, res) => {
     return res.json({ ok: true, data });
   } catch (e: any) {
     console.error("GET /api/employer/jobs error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
+    return res
+      .status(500)
+      .json({ ok: false, error: e?.message || "Internal error" });
   }
 });
 
@@ -122,13 +139,15 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
       return res.status(400).json({ ok: false, error: "title wajib diisi" });
     }
 
-    // NOTE produksi: ambil dari session auth
+    // produksi: ambil dari session auth
     const employerId = bodyEmployerId || process.env.DEV_EMPLOYER_ID;
     if (!employerId) {
-      return res.status(401).json({ ok: false, error: "Tidak ada employerId (login dulu)" });
+      return res
+        .status(401)
+        .json({ ok: false, error: "Tidak ada employerId (login dulu)" });
     }
 
-    // (opsional) update logo di profil employer dari base64 data URL
+    // (opsional) update logo via base64
     if (logoDataUrl && typeof logoDataUrl === "string") {
       await prisma.employer.update({
         where: { id: employerId },
@@ -148,15 +167,27 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
       select: { displayName: true, profile: { select: { logoUrl: true } } },
     });
 
+    // kadang TS masih pakai tipe lama -> cast ringan sebagai guard
     const job = await prisma.job.create({
       data: {
         employerId,
         title,
         description: description ?? null,
-        location: location ?? null,
-        employment: employment ?? null,
-        isDraft: Boolean(isDraft),
-        isActive: !Boolean(isDraft), // bukan draft => aktif
+        // kolom baru, izinkan null
+        location: (location ?? null) as any,
+        employment: (employment ?? null) as any,
+
+        isDraft: !!isDraft,
+        isActive: !isDraft,
+      } as any,
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        description: true,
+        isActive: true,
+        location: true,
+        employment: true,
       },
     });
 
@@ -176,6 +207,8 @@ jobsRouter.post("/employer/jobs", async (req, res) => {
     });
   } catch (e: any) {
     console.error("POST /api/employer/jobs error:", e);
-    return res.status(500).json({ ok: false, error: e?.message || "Internal error" });
+    return res
+      .status(500)
+      .json({ ok: false, error: e?.message || "Internal error" });
   }
 });

@@ -1,8 +1,33 @@
 'use client';
 
 import Nav from '@/components/nav';
-// import Footer from '@/components/Footer'; // opsional
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+
+/* ------------------- Helpers ------------------- */
+const API =
+  process.env.NEXT_PUBLIC_API_BASE ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:4000';
+
+function pickCompanyName(payload: any): string | null {
+  // coba berbagai kemungkinan bentuk payload BE
+  const e =
+    payload?.employer ||
+    payload?.data?.employer ||
+    payload?.data ||
+    payload ||
+    null;
+
+  const name =
+    e?.displayName ??
+    e?.display_name ??
+    e?.company ??
+    e?.legalName ??
+    e?.legal_name ??
+    null;
+
+  return name ? String(name) : null;
+}
 
 /* ------- Mini Chart (SVG, tanpa lib) ------- */
 function AreaChart({
@@ -86,7 +111,30 @@ function AreaChart({
 }
 
 export default function EmployerHome() {
-  // headline stats
+  const [companyName, setCompanyName] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // fetch identitas employer (harus include cookie)
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = API.replace(/\/+$/, '');
+        const r = await fetch(`${base}/api/employers/auth/me`, {
+          credentials: 'include',
+        });
+        const j = await r.json().catch(() => ({} as any));
+        // console.log('[auth/me] =>', j);
+        const name = pickCompanyName(j);
+        if (name) setCompanyName(name);
+      } catch (e) {
+        // silent
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // headline stats (dummy)
   const stats = [
     { label: 'Active Jobs', value: 3 },
     { label: 'Total Applicants', value: 47 },
@@ -109,10 +157,28 @@ export default function EmployerHome() {
       <main className="min-h-[60vh] bg-slate-50">
         <div className="mx-auto max-w-6xl px-4 py-8">
           <header className="mb-6">
-            <h1 className="text-2xl font-semibold text-slate-900">Employer Overview</h1>
-            <p className="text-sm text-slate-600">
-              Ringkasan akun perusahaan dan performa lowongan.
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h1 className="text-2xl font-semibold text-slate-900">Employer Overview</h1>
+                <p className="text-sm text-slate-600">
+                  Ringkasan akun perusahaan dan performa lowongan.
+                </p>
+              </div>
+
+              {/* Badge nama perusahaan */}
+              <div className="inline-flex max-w-xs items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <span className="text-xs text-slate-500">Company</span>
+                <span className="truncate text-sm font-medium text-slate-900">
+                  {loading ? '...' : companyName || '—'}
+                </span>
+              </div>
+            </div>
+
+            {!companyName && !loading && (
+              <p className="mt-2 text-xs text-amber-600">
+                Nama perusahaan belum terbaca—pastikan sudah login sebagai employer.
+              </p>
+            )}
           </header>
 
           {/* Stats ringkas */}
@@ -132,9 +198,7 @@ export default function EmployerHome() {
           <section className="mt-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-slate-900">
-                  Performance (Last 7)
-                </h3>
+                <h3 className="text-base font-semibold text-slate-900">Performance (Last 7)</h3>
                 <span className="text-xs text-slate-500">Auto-updated</span>
               </div>
 
@@ -159,12 +223,7 @@ export default function EmployerHome() {
                     {series.views.reduce((a, b) => a + b, 0).toLocaleString('id-ID')}
                   </p>
                   <div className="mt-2">
-                    <AreaChart
-                      data={series.views}
-                      height={90}
-                      color="#d97706"
-                      fill="rgba(217,119,6,.12)"
-                    />
+                    <AreaChart data={series.views} height={90} color="#d97706" fill="rgba(217,119,6,.12)" />
                   </div>
                 </div>
 
@@ -174,12 +233,7 @@ export default function EmployerHome() {
                     {series.jobs.reduce((a, b) => a + b, 0).toLocaleString('id-ID')}
                   </p>
                   <div className="mt-2">
-                    <AreaChart
-                      data={series.jobs}
-                      height={90}
-                      color="#059669"
-                      fill="rgba(5,150,105,.12)"
-                    />
+                    <AreaChart data={series.jobs} height={90} color="#059669" fill="rgba(5,150,105,.12)" />
                   </div>
                 </div>
               </div>
@@ -191,7 +245,6 @@ export default function EmployerHome() {
           </section>
         </div>
       </main>
-      {/* <Footer /> */}
     </>
   );
 }

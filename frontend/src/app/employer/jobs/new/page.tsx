@@ -86,7 +86,8 @@ export default function NewJobPage() {
     (async () => {
       try {
         const base = API.replace(/\/+$/, '');
-        const r = await fetch(`${base}/api/employers/auth/me`, {
+        // ⬇️ GANTI: pakai endpoint yang baca DB
+        const r = await fetch(`${base}/api/employers/me`, {
           credentials: 'include',
         });
 
@@ -95,56 +96,36 @@ export default function NewJobPage() {
 
         if (r.ok) {
           const j = await r.json().catch(() => ({} as any));
-          // LOG agar mudah cek di console:
-          console.log('[auth/me] payload =', j);
+          console.log('[employers/me] payload =', j);
 
           // ---- id ----
           eid =
-            j?.data?.employer?.id ||
             j?.employer?.id ||
+            j?.data?.employer?.id ||
             j?.id ||
             undefined;
 
-          // ---- company name (lengkapi dengan displayName camelCase) ----
+          // ---- company name (displayName camelCase + snake_case fallback) ----
           comp =
-            j?.data?.employer?.displayName ||        // ✅ tambahkan ini
-            j?.employer?.displayName ||              // ✅ tambahkan ini
-            j?.data?.employer?.display_name ||
-            j?.data?.employer?.company ||
+            j?.employer?.displayName ||
+            j?.data?.employer?.displayName ||
             j?.employer?.display_name ||
-            j?.employer?.company ||
+            j?.data?.employer?.display_name ||
+            j?.employer?.legalName ||
+            j?.employer?.legal_name ||
             undefined;
         } else {
-          console.warn('[auth/me] HTTP', r.status);
+          console.warn('[employers/me] HTTP', r.status);
         }
 
-        // Fallback localStorage (kalau ada)
+        // Fallback localStorage (kalau ada dari proses lain)
         if (!eid) eid = localStorage.getItem('ark_employer_id') || undefined;
         if (!comp) comp = localStorage.getItem('ark_employer_company') || undefined;
-
-        // Kalau ada id tapi nama belum ada — bisa coba endpoint profil
-        if (eid && !comp) {
-          const pr = await fetch(
-            `${base}/api/employers/profile?employerId=${encodeURIComponent(eid)}`,
-            { credentials: 'include' }
-          );
-          if (pr.ok) {
-            const pj = await pr.json().catch(() => ({} as any));
-            comp =
-              pj?.data?.displayName ||               // ✅ juga cek camelCase di sini
-              pj?.displayName ||
-              pj?.data?.display_name ||
-              pj?.data?.company ||
-              pj?.display_name ||
-              pj?.company ||
-              comp;
-          }
-        }
 
         if (eid) setEmployerId(String(eid));
         if (comp) setCompanyName(String(comp));
       } catch (err) {
-        console.warn('[auth/me] error:', err);
+        console.warn('[employers/me] error:', err);
       }
     })();
   }, []);
@@ -245,7 +226,7 @@ export default function NewJobPage() {
       const res = await fetch(`${API.replace(/\/+$/, '')}/api/employer/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        credentials: 'include', // penting untuk session/cookie
         body: JSON.stringify({ ...payload, employerId }),
       });
 

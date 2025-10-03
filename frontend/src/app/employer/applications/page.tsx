@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import Nav from '@/components/nav';
 import Footer from '@/components/Footer';
 
@@ -9,31 +9,33 @@ const API =
   process.env.NEXT_PUBLIC_API_URL ||
   'http://localhost:4000';
 
+/* ===== Hanya 3 status yang dipakai di UI ===== */
+type StatusAllowed = 'submitted' | 'rejected' | 'hired';
+
 type AppRow = {
   id: string;
   candidateName: string;
   candidateEmail?: string | null;
   jobTitle: string;
-  status: 'submitted' | 'review' | 'shortlist' | 'rejected' | 'hired';
+  status: string; // tetap string agar data lama (review/shortlist) tetap terbaca
   createdAt: string | null; // ISO | null
   cv?: { url: string; name?: string | null; type?: string | null; size?: number | null } | null;
 };
 
 type Counters = {
   submitted: number;
-  review: number;
-  shortlist: number;
   rejected: number;
   hired: number;
 };
 
 const EMPTY_COUNTERS: Counters = {
   submitted: 0,
-  review: 0,
-  shortlist: 0,
   rejected: 0,
   hired: 0,
 };
+
+/* Dropdown status yang diizinkan */
+const ALLOWED: readonly StatusAllowed[] = ['submitted', 'rejected', 'hired'] as const;
 
 export default function EmployerApplicationsPage() {
   const [rows, setRows] = useState<AppRow[]>([]);
@@ -67,12 +69,9 @@ export default function EmployerApplicationsPage() {
       }
 
       const payload = json?.data || json || {};
-      setRows(Array.isArray(payload.rows) ? payload.rows : []);
-      setCounters(
-        payload.counters && typeof payload.counters === 'object'
-          ? payload.counters
-          : EMPTY_COUNTERS
-      );
+      const list: AppRow[] = Array.isArray(payload.rows) ? payload.rows : [];
+      setRows(list);
+      setCounters(recomputeCounters(list));
     } catch (e: any) {
       setErr(e?.message || 'Network error');
       setRows([]);
@@ -101,20 +100,21 @@ export default function EmployerApplicationsPage() {
     return `${base}${partial.startsWith('/') ? '' : '/'}${partial}`;
   };
 
-  // Hitung ulang counters lokal saat kita melakukan optimistic update
+  // Hitung ulang counters lokal – hanya 3 status yang dihitung
   const recomputeCounters = (list: AppRow[]): Counters => {
     const c = { ...EMPTY_COUNTERS };
     for (const r of list) {
-      if (r.status in c) {
-        // @ts-ignore
-        c[r.status] += 1;
+      const s = r.status as StatusAllowed;
+      if ((ALLOWED as readonly string[]).includes(s)) {
+        // @ts-ignore safe
+        c[s] += 1;
       }
     }
     return c;
   };
 
-  // Update status (optimistic). Sesuaikan endpoint jika backend Anda berbeda.
-  const updateStatus = async (id: string, newStatus: AppRow['status']) => {
+  // Update status (optimistic) – hanya 3 status yang diizinkan
+  const updateStatus = async (id: string, newStatus: StatusAllowed) => {
     const base = (API || '').replace(/\/+$/, '');
     const employerId = localStorage.getItem('ark_employer_id') || '';
 
@@ -141,9 +141,6 @@ export default function EmployerApplicationsPage() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json?.error || `HTTP ${res.status}`);
       }
-
-      // opsi: refresh data dari server untuk sinkron
-      // await load();
     } catch (e: any) {
       // rollback
       setRows(before);
@@ -164,9 +161,6 @@ export default function EmployerApplicationsPage() {
     updateStatus(row.id, 'rejected');
   };
 
-  // Tambahan: dropdown cepat ke status lain
-  const otherStatuses: AppRow['status'][] = ['submitted', 'review', 'shortlist', 'rejected', 'hired'];
-
   return (
     <>
       <Nav />
@@ -177,12 +171,10 @@ export default function EmployerApplicationsPage() {
             Semua pelamar dari lowongan perusahaan Anda.
           </p>
 
-          {/* Ringkasan status */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-6">
+          {/* Ringkasan status – hanya 3 kartu */}
+          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
               { label: 'SUBMITTED', val: counters.submitted },
-              { label: 'REVIEW', val: counters.review },
-              { label: 'SHORTLIST', val: counters.shortlist },
               { label: 'REJECTED', val: counters.rejected },
               { label: 'HIRED', val: counters.hired },
             ].map((it) => (
@@ -222,7 +214,9 @@ export default function EmployerApplicationsPage() {
                       {/^HTTP 401/.test(err) && (
                         <span className="text-slate-600">
                           – Kamu perlu login sebagai employer.{' '}
-                          <a href="/employer/login" className="text-blue-700 underline">Login</a>
+                          <a href="/employer/login" className="text-blue-700 underline">
+                            Login
+                          </a>
                         </span>
                       )}
                     </td>
@@ -237,71 +231,83 @@ export default function EmployerApplicationsPage() {
                   </tr>
                 )}
 
-                {!loading && !err && rows.map((r) => {
-                  const saving = !!savingIds[r.id];
-                  return (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-medium text-slate-900">{r.candidateName}</td>
-                      <td className="px-4 py-3 text-slate-700">{r.candidateEmail || '-'}</td>
-                      <td className="px-4 py-3 text-slate-700">{r.jobTitle}</td>
-                      <td className="px-4 py-3">
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{pretty(r.createdAt)}</td>
-                      <td className="px-4 py-3">
-                        {r.cv ? (
-                          <a
-                            href={cvHref(r.cv.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-700 underline"
-                          >
-                            {r.cv.name || 'CV'}
-                          </a>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => onAccept(r)}
-                            disabled={saving}
-                            className={`rounded-full px-3 py-1 text-xs font-medium text-white ${saving ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'} disabled:opacity-60`}
-                            title="Terima (ubah status ke HIRED)"
-                          >
-                            {saving ? 'Menyimpan…' : 'Terima'}
-                          </button>
-                          <button
-                            onClick={() => onReject(r)}
-                            disabled={saving}
-                            className={`rounded-full px-3 py-1 text-xs font-medium text-white ${saving ? 'bg-rose-400' : 'bg-rose-600 hover:bg-rose-700'} disabled:opacity-60`}
-                            title="Tolak (ubah status ke REJECTED)"
-                          >
-                            Tolak
-                          </button>
+                {!loading &&
+                  !err &&
+                  rows.map((r) => {
+                    const saving = !!savingIds[r.id];
+                    // kalau status bukan salah satu yg diizinkan (mis. 'review'/'shortlist'),
+                    // dropdown akan default ke 'submitted' sampai user mengganti
+                    const selectValue: StatusAllowed = (ALLOWED.includes(r.status as StatusAllowed)
+                      ? (r.status as StatusAllowed)
+                      : 'submitted');
 
-                          {/* Optional: Quick change ke status lain */}
-                          <select
-                            value={r.status}
-                            disabled={saving}
-                            onChange={(e) => updateStatus(r.id, e.target.value as AppRow['status'])}
-                            className="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-                            title="Ubah status cepat"
-                          >
-                            {otherStatuses.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                    return (
+                      <tr key={r.id} className="border-b last:border-0">
+                        <td className="px-4 py-3 font-medium text-slate-900">{r.candidateName}</td>
+                        <td className="px-4 py-3 text-slate-700">{r.candidateEmail || '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{r.jobTitle}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{pretty(r.createdAt)}</td>
+                        <td className="px-4 py-3">
+                          {r.cv ? (
+                            <a
+                              href={cvHref(r.cv.url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-700 underline"
+                            >
+                              {r.cv.name || 'CV'}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => onAccept(r)}
+                              disabled={saving}
+                              className={`rounded-full px-3 py-1 text-xs font-medium text-white ${
+                                saving ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'
+                              } disabled:opacity-60`}
+                              title="Terima (ubah status ke HIRED)"
+                            >
+                              {saving ? 'Menyimpan…' : 'Terima'}
+                            </button>
+                            <button
+                              onClick={() => onReject(r)}
+                              disabled={saving}
+                              className={`rounded-full px-3 py-1 text-xs font-medium text-white ${
+                                saving ? 'bg-rose-400' : 'bg-rose-600 hover:bg-rose-700'
+                              } disabled:opacity-60`}
+                              title="Tolak (ubah status ke REJECTED)"
+                            >
+                              Tolak
+                            </button>
+
+                            {/* Quick change – hanya 3 status */}
+                            <select
+                              value={selectValue}
+                              disabled={saving}
+                              onChange={(e) => updateStatus(r.id, e.target.value as StatusAllowed)}
+                              className="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                              title="Ubah status cepat"
+                            >
+                              {ALLOWED.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>

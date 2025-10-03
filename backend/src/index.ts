@@ -27,7 +27,7 @@ import employerApplicationsRouter from './routes/employer-applications';
 // Admin Jobs router
 import adminJobsRouter from './routes/admin-jobs';
 
-// ⬅️ DEV auth helper router (meng-handle /auth/me dev dsb.)
+// DEV helper routes (mis. set cookie emp_session, dll)
 import authDev from './routes/auth-dev';
 
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
@@ -83,7 +83,8 @@ const corsOptions: cors.CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id'],
+  // include keduanya (case-insensitive di spec, tapi aman).
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id', 'x-employer-id'],
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
@@ -104,7 +105,7 @@ app.use((_req, res, next) => {
     if (Array.isArray(x)) return x.map(conv);
     if (typeof x === 'object') {
       const o: any = {};
-      for (const k of Object.keys(x)) o[k] = conv(x[k]);
+      for (const k of Object.keys(x)) o[k] = conv((x as any)[k]);
       return o;
     }
     return x;
@@ -128,7 +129,6 @@ app.get('/healthz', (_req, res) => res.json({ ok: true })); // alias
 app.use(authDev);
 
 /* ================= ROUTES (ORDER MATTERS!) ================= */
-/* Spesifik dulu supaya tidak ketimpa prefix lain */
 
 // Employer Applications (list & patch)
 app.use('/api/employers/applications', employerApplicationsRouter);
@@ -156,9 +156,8 @@ app.use('/api/payments', paymentsRouter);
 /* Jobs API (publik) */
 app.use('/api', jobsRouter);
 
-app.use("/api", adminJobsRouter);
-
 /* Admin Jobs API */
+app.use('/api', adminJobsRouter);
 app.use('/api/admin', adminJobsRouter);
 
 /* Applications API (user apply, dsb.) */

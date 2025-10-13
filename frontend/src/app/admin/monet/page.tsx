@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api'; // jika alias @ belum ada, ganti ke path relatif
+import { api } from '@/lib/api';
 
 type Plan = {
   id: string;
@@ -13,6 +13,7 @@ type Plan = {
   interval: string;      // 'month' | 'year'
   active: boolean;
   priceId?: string | null;
+  trialDays: number;     // ← penting
 };
 
 const fmtIDR = (n: number) =>
@@ -24,11 +25,12 @@ type PlanForm = {
   slug: string;
   name: string;
   description: string;
-  amount: string;   // nanti di-parse ke number
+  amount: string;   // di-parse ke number
   currency: string;
   interval: string;
   active: boolean;
   priceId: string;
+  trialDays: string; // di-parse ke number
 };
 
 const emptyForm: PlanForm = {
@@ -41,9 +43,10 @@ const emptyForm: PlanForm = {
   interval: 'month',
   active: true,
   priceId: '',
+  trialDays: '0',
 };
 
-export default function PlansPage() {
+export default function MonetPlansPage() {
   const [items, setItems] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export default function PlansPage() {
       interval: p.interval ?? 'month',
       active: !!p.active,
       priceId: p.priceId ?? '',
+      trialDays: String(p.trialDays ?? 0),
     });
     setModalOpen(true);
   }
@@ -100,6 +104,7 @@ export default function PlansPage() {
         interval: (form.interval || 'month').trim(),
         active: !!form.active,
         priceId: form.priceId?.trim() || null,
+        trialDays: Math.max(0, Number(form.trialDays || 0)),
       };
 
       if (!payload.slug) throw new Error('Slug wajib diisi');
@@ -144,7 +149,7 @@ export default function PlansPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Paket Monetisasi</h1>
-          <p className="text-sm text-slate-600">Kelola paket, harga, status aktif/nonaktif.</p>
+          <p className="text-sm text-slate-600">Kelola paket, harga (boleh 0/Gratis), dan masa trial.</p>
         </div>
         <button
           onClick={openCreate}
@@ -183,8 +188,12 @@ export default function PlansPage() {
                   {p.active ? 'Active' : 'Inactive'}
                 </span>
               </div>
-              <div className="mt-2 text-lg font-bold">{fmtIDR(p.amount)}</div>
+
+              <div className="mt-2 text-lg font-bold">{p.amount === 0 ? 'Gratis' : fmtIDR(p.amount)}</div>
+              <div className="mt-1 text-xs text-slate-500">Trial: <b>{p.trialDays} hari</b></div>
+
               <div className="mt-2 text-sm text-slate-600 line-clamp-3">{p.description || '—'}</div>
+
               <div className="mt-4 flex gap-2">
                 <button
                   onClick={() => openEdit(p)}
@@ -199,6 +208,7 @@ export default function PlansPage() {
                   Hapus
                 </button>
               </div>
+
               <div className="mt-3 text-xs text-slate-500">slug: {p.slug}</div>
             </div>
           ))}
@@ -241,6 +251,7 @@ export default function PlansPage() {
                   <input
                     type="number"
                     inputMode="numeric"
+                    min={0}
                     value={form.amount}
                     onChange={(e) => {
                       const v = e.target.value.replace(/[^\d]/g, '');
@@ -248,6 +259,7 @@ export default function PlansPage() {
                     }}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                   />
+                  <div className="mt-1 text-xs text-slate-500">Isi 0 untuk paket gratis.</div>
                 </label>
 
                 <label className="block text-sm">
@@ -262,6 +274,22 @@ export default function PlansPage() {
                   </select>
                 </label>
               </div>
+
+              <label className="block text-sm">
+                <div className="mb-1 text-slate-600">Trial (hari)</div>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={form.trialDays}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^\d]/g, '');
+                    setForm((f) => ({ ...f, trialDays: v }));
+                  }}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                />
+                <div className="mt-1 text-xs text-slate-500">Isi 0 jika tidak ada trial.</div>
+              </label>
 
               <label className="block text-sm">
                 <div className="mb-1 text-slate-600">Deskripsi</div>

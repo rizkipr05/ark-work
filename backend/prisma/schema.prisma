@@ -69,6 +69,23 @@ model Employer {
   onboardingStep OnboardingStep @default(PACKAGE) @map("onboarding_step")
   blockedAt      DateTime?
 
+  /**
+   * ===== Monetisasi / Trial & Plan Aktif =====
+   * Catatan:
+   * - trialEndsAt & premiumUntil dipakai untuk guard akses fitur
+   * - currentPlanId refer ke Plan aktif saat ini
+   */
+  billingStatus  BillingStatus @default(none) @map("billing_status")
+  currentPlanId  String?       @map("current_plan_id") @db.Uuid
+  trialStartedAt DateTime?     @map("trial_started_at") @db.Timestamptz(6)
+  trialEndsAt    DateTime?     @map("trial_ends_at") @db.Timestamptz(6)
+  premiumUntil   DateTime?     @map("premium_until") @db.Timestamptz(6)
+  recurringToken String?       @map("recurring_token") // saved_token_id dari Midtrans (opsional)
+
+  /**
+   * ===== Relations =====
+   */
+  currentPlan   Plan?                 @relation("EmployerCurrentPlan", fields: [currentPlanId], references: [id])
   admins        EmployerAdminUser[]
   contacts      EmployerContact[]
   metas         EmployerMeta[]
@@ -80,6 +97,9 @@ model Employer {
   subscriptions Subscription[]
   verifications VerificationRequest[]
 
+  @@index([billingStatus, trialEndsAt])
+  @@index([currentPlanId])
+  @@index([premiumUntil])
   @@map("employers")
 }
 
@@ -173,36 +193,50 @@ model EmployerMeta {
  * ===================== Plans / Payments =====================
  */
 model Plan {
-  id            String         @id @default(uuid()) @db.Uuid
-  slug          String         @unique
-  name          String
-  description   String?
-  currency      String         @default("IDR")
-  interval      String         @default("month")
-  amount        BigInt
-  active        Boolean        @default(true)
-  priceId       String?
+  id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique
+  name        String
+  description String?
+  currency    String  @default("IDR")
+  interval    String  @default("month") // "month" | "year"
+  amount      BigInt
+  active      Boolean @default(true)
+  priceId     String?
+  trialDays   Int     @default(0) // lama trial paket (0 = tanpa trial)
+
   payments      Payment[]
   subscriptions Subscription[]
+
+  // back-relation untuk Employer.currentPlan
+  currentForEmployers Employer[] @relation("EmployerCurrentPlan")
 
   @@map("plans")
 }
 
 model Subscription {
-  id                 String             @id @default(uuid()) @db.Uuid
-  employerId         String             @map("employer_id") @db.Uuid
-  planId             String             @map("plan_id") @db.Uuid
-  providerId         String?            @map("provider_id")
-  status             String             @default("active")
-  currentPeriodStart DateTime?          @map("current_period_start")
-  currentPeriodEnd   DateTime?          @map("current_period_end")
-  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  items              SubscriptionItem[]
-  employer           Employer           @relation(fields: [employerId], references: [id], onDelete: Cascade)
-  plan               Plan               @relation(fields: [planId], references: [id])
+  id                 String    @id @default(uuid()) @db.Uuid
+  employerId         String    @map("employer_id") @db.Uuid
+  planId             String    @map("plan_id") @db.Uuid
+  providerId         String?   @map("provider_id") // id langganan di Midtrans (subscription id)
+  status             String    @default("active")  // active | past_due | canceled | expired
+  currentPeriodStart DateTime? @map("current_period_start")
+  currentPeriodEnd   DateTime? @map("current_period_end")
+  startAt            DateTime? @map("start_at") // jadwal mulai (bisa masa depan, pasca-trial)
+  trialEndsAt        DateTime? @map("trial_ends_at")
+  cancelAt           DateTime? @map("cancel_at")   // jadwal cancel di akhir periode
+  canceledAt         DateTime? @map("canceled_at") // waktu cancel aktual
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items    SubscriptionItem[]
+  employer Employer           @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  plan     Plan               @relation(fields: [planId], references: [id])
 
   @@index([employerId])
+  @@index([planId])
+  @@index([status, currentPeriodEnd])
+  @@index([trialEndsAt])
   @@map("subscriptions")
 }
 
@@ -219,24 +253,25 @@ model SubscriptionItem {
 }
 
 model Payment {
-  id            String    @id @default(uuid()) @db.Uuid
-  orderId       String    @unique @map("order_id")
-  planId        String?   @map("plan_id") @db.Uuid
-  employerId    String?   @map("employer_id") @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
+  orderId       String   @unique @map("order_id")
+  planId        String?  @map("plan_id") @db.Uuid
+  employerId    String?  @map("employer_id") @db.Uuid
   userId        String?
-  currency      String    @default("IDR")
-  grossAmount   BigInt    @map("gross_amount")
+  currency      String   @default("IDR")
+  grossAmount   BigInt   @map("gross_amount")
   method        String?
-  status        String    @default("pending")
-  transactionId String?   @map("transaction_id")
-  fraudStatus   String?   @map("fraud_status")
+  status        String   @default("pending")
+  transactionId String?  @map("transaction_id")
+  fraudStatus   String?  @map("fraud_status")
   meta          Json?
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  redirectUrl   String?   @map("redirect_url")
-  token         String?   @map("token")
-  employer      Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
-  plan          Plan?     @relation(fields: [planId], references: [id])
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  redirectUrl   String?  @map("redirect_url")
+  token         String?  @map("token")
+
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  plan     Plan?     @relation(fields: [planId], references: [id])
 
   @@index([planId])
   @@index([employerId])
@@ -416,7 +451,7 @@ model JobReport {
 
   @@index([jobId, status])
   @@index([status, createdAt])
-  @@map("job_reports") // ganti/hapus jika nama tabel berbeda
+  @@map("job_reports")
 }
 
 /**
@@ -456,6 +491,14 @@ enum EmployerStatus {
   archived
 
   @@map("employer_status")
+}
+
+enum BillingStatus {
+  none      // belum pilih paket / belum bayar
+  trial     // sedang trial (pakai Plan.trialDays)
+  active    // berlangganan aktif (premium)
+  past_due  // gagal charge / menunggak
+  canceled  // berhenti langganan
 }
 
 enum CompanySize {
@@ -503,7 +546,7 @@ enum Education {
 }
 
 /**
- * ====== Enums untuk JobReport (WAJIB, agar error P1012 hilang) ======
+ * ====== Enums untuk JobReport ======
  */
 enum ReportReason {
   SCAM

@@ -2,23 +2,28 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-// ================= Config =================
+/* ================= Config ================= */
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000';
 const MIDTRANS_CLIENT_KEY = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ?? '';
 
-// ================= Types dari UI lama =================
+/* ================= Types (UI) ================= */
 export type PackageId = string;
 export type Package = {
-  id: PackageId;            // ex: 'starter', 'basic', 'pro' (disarankan = slug plan)
+  id: PackageId;            // disarankan = slug plan
   title: string;            // nama paket di UI
   price: number;            // IDR
   features: string[];
   interval?: 'month' | 'year';
-  // Opsional: kalau kamu sudah simpan mapping planId Midtrans/DB di level UI
-  planId?: string;
+  planId?: string;          // opsional: id plan di DB/Midtrans
 };
 
-// ================ Utils kecil ================
+/* ================= Ekstra types (respon backend employer step3) ================= */
+type Step3Resp =
+  | { ok: true; mode: 'trial'; trialEndsAt: string }
+  | { ok: true; mode: 'free_active'; premiumUntil: string }
+  | { ok: true; mode: 'needs_payment' };
+
+/* ================= Utils ================= */
 function classNames(...a: (string | false | null | undefined)[]) {
   return a.filter(Boolean).join(' ');
 }
@@ -26,35 +31,35 @@ function formatIDR(n: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 }
 
-// ================ Komponen utama ================
+/* ================= Komponen ================= */
 export default function Step2Package({
   packages, selected, setSelected, onBack, onNext,
-  userId,                 // <-- kirim dari parent (disarankan). WAJIB agar backend tidak error.
-  employerId,             // <-- opsional, kalau mau kaitkan payment ke employer tertentu
-  customerEmail,          // <-- opsional; kalau ada, dikirim ke Midtrans
-  customerName,           // <-- opsional; kalau ada, dikirim ke Midtrans
+  userId,
+  employerId,
+  customerEmail,
+  customerName,
 }: {
   packages: Package[];
   selected: PackageId;
   setSelected: (v: PackageId) => void;
   onBack: () => void;
   onNext: () => void;
-  userId?: string;        // Wajib di backend. Kalau belum ada auth, sementara bisa hardcode di parent.
-  employerId?: string;
+  userId?: string;
+  employerId?: string;      // jika ada employer flow → bisa auto trial/gratis
   customerEmail?: string;
   customerName?: string;
 }) {
   const current = packages.find((p) => p.id === selected)!;
 
-  // State loading Snap / bayar
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRedirectUrl, setLastRedirectUrl] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null); // banner info (trial/gratis)
 
-  // Muat Snap hanya sekali ketika komponen dipakai
+  /* Muat Midtrans Snap sekali */
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.snap || !MIDTRANS_CLIENT_KEY) return;
+    if ((window as any).snap || !MIDTRANS_CLIENT_KEY) return;
     const s = document.createElement('script');
     s.src = 'https://app.sandbox.midtrans.com/snap/snap.js';
     s.setAttribute('data-client-key', MIDTRANS_CLIENT_KEY);
@@ -63,13 +68,11 @@ export default function Step2Package({
     return () => { document.body.removeChild(s); };
   }, []);
 
-  // Fallback: cari plan dari /api/payments/plans dengan slug === selected
+  /* Ambil planId dari server jika perlu (fallback) */
   async function resolvePlanId(): Promise<{ planId: string, interval?: string } | null> {
-    // 1) Kalau package-nya sudah punya planId, langsung pakai
     const pkg = packages.find(p => p.id === selected);
     if (pkg?.planId) return { planId: pkg.planId, interval: pkg.interval };
 
-    // 2) Ambil plan publik & cocokkan slug == selected (disarankan id package = slug plan)
     const res = await fetch(`${API_BASE}/api/payments/plans`, { credentials: 'include' });
     if (!res.ok) throw new Error('Gagal memuat daftar plan');
     const plans = await res.json() as Array<{ id: string; slug: string; interval?: string }>;
@@ -77,29 +80,56 @@ export default function Step2Package({
     return found ? { planId: found.id, interval: found.interval } : null;
   }
 
-  // Handler klik "Bayar"
+  /* Klik Bayar / Subscribe */
   async function handlePay() {
     try {
       setError(null);
+      setInfo(null);
       setPaying(true);
       setLastRedirectUrl(null);
 
       if (!selected) throw new Error('Silakan pilih paket.');
       if (!userId) throw new Error('User belum terautentikasi (userId tidak tersedia).');
 
-      // Pastikan dapat planId untuk checkout
+      /* === 1) Jika ini flow employer dan server izinkan trial/gratis, lewati pembayaran === */
+      if (employerId) {
+        const step3 = await fetch(`${API_BASE}/api/employers/step3`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ employerId, planSlug: selected }),
+        });
+        const result = (await step3.json()) as Step3Resp;
+        if (!step3.ok || !result?.ok) {
+          const msg = (result as any)?.error || (result as any)?.message || 'Gagal menetapkan paket.';
+          throw new Error(msg);
+        }
+
+        if (result.mode === 'trial') {
+          setInfo(`Akun mulai masa uji coba. Berakhir: ${new Date(result.trialEndsAt).toLocaleString('id-ID')}.`);
+          onNext();
+          return;
+        }
+        if (result.mode === 'free_active') {
+          setInfo('Paket gratis telah diaktifkan. Tidak perlu pembayaran.');
+          onNext();
+          return;
+        }
+        // mode === 'needs_payment' → lanjut ke 2)
+      }
+
+      /* === 2) Perlu pembayaran → buat transaksi Snap/redirect === */
       const resolved = await resolvePlanId();
-      if (!resolved?.planId) throw new Error('Plan tidak ditemukan. Pastikan slug paket sama dengan plan.slug di backend.');
+      if (!resolved?.planId) throw new Error('Plan tidak ditemukan. Pastikan id paket = slug plan di backend.');
       const planId = resolved.planId;
 
-      // Panggil backend untuk bikin transaksi
       const resp = await fetch(`${API_BASE}/api/payments/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           planId,
-          userId,                   // ⬅️ WAJIB, agar tidak error "Invalid params: userId required"
+          userId,
           employerId: employerId || undefined,
           customer: {
             email: customerEmail || undefined,
@@ -113,12 +143,11 @@ export default function Step2Package({
       const { token, redirect_url } = data as { token: string; redirect_url: string };
       setLastRedirectUrl(redirect_url);
 
-      // Buka Snap kalau ada; kalau tidak, buka redirect_url di tab baru
       if (typeof window !== 'undefined' && (window as any).snap?.pay) {
         await new Promise<void>((resolve, reject) => {
           (window as any).snap.pay(token, {
-            onSuccess: () => resolve(),              // berhasil => lanjut step berikut
-            onPending: () => resolve(),              // pending juga boleh lanjut (nanti diverifikasi dari webhook)
+            onSuccess: () => resolve(),
+            onPending: () => resolve(),
             onError: (e: any) => reject(new Error(e?.message || 'Pembayaran gagal')),
             onClose: () => reject(new Error('Jendela pembayaran ditutup sebelum selesai')),
           });
@@ -127,7 +156,6 @@ export default function Step2Package({
         window.open(redirect_url, '_blank', 'noopener,noreferrer');
       }
 
-      // Kalau sampai sini, anggap sukses/pending → lanjut ke step berikutnya
       onNext();
     } catch (e: any) {
       setError(e?.message || 'Gagal memproses pembayaran.');
@@ -136,7 +164,6 @@ export default function Step2Package({
     }
   }
 
-  // Info ringkas paket terpilih
   const summary = useMemo(() => {
     if (!current) return null;
     return {
@@ -150,6 +177,13 @@ export default function Step2Package({
     <div className="rounded-2xl border border-slate-200 p-5">
       <h2 className="text-2xl font-semibold text-slate-900">Pilih Paket</h2>
       <p className="mt-1 text-sm text-slate-600">Pilih paket sesuai kebutuhan. Bisa upgrade kapan saja.</p>
+
+      {/* Info Box (trial/gratis) */}
+      {info && (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+          {info}
+        </div>
+      )}
 
       {/* Error Box */}
       {error && (
@@ -205,7 +239,6 @@ export default function Step2Package({
           <span className="font-semibold text-slate-900">{summary ? summary.priceText : '-'}</span>
         </div>
 
-        {/* Info: kalau client key belum di-set, kita pakai redirect_url */}
         {!MIDTRANS_CLIENT_KEY && (
           <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
             <b>Catatan:</b> <code>NEXT_PUBLIC_MIDTRANS_CLIENT_KEY</code> belum diset.
@@ -213,16 +246,10 @@ export default function Step2Package({
           </p>
         )}
 
-        {/* Kalau sebelumnya sempat gagal buka popup, kasih tombol buka link manual */}
         {lastRedirectUrl && (
           <div className="mt-3 text-xs">
-            Link pembayaran:{" "}
-            <a
-              href={lastRedirectUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-blue-700 underline"
-            >
+            Link pembayaran:{' '}
+            <a href={lastRedirectUrl} target="_blank" rel="noreferrer noopener" className="text-blue-700 underline">
               Buka kembali
             </a>
           </div>

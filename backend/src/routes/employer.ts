@@ -5,6 +5,7 @@ import { parse as parseCookie } from 'cookie';
 import path from 'node:path';
 import fs from 'node:fs';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 
 export const employerRouter = Router();
@@ -92,7 +93,6 @@ export async function attachEmployerId(req: Request, _res: Response, next: NextF
     const auth = await resolveEmployerAuth(req);
     req.employerId = auth?.employerId ?? null;
     req.employerSessionId = auth?.sessionId ?? null;
-    // ✅ konsisten: gunakan adminUserId
     req.employerAdminUserId = auth?.adminUserId ?? null;
   } catch {
     req.employerId = null;
@@ -102,8 +102,36 @@ export async function attachEmployerId(req: Request, _res: Response, next: NextF
   next();
 }
 
+/* ================== Small utils ================== */
+function slugify(s: string) {
+  return (s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    .slice(0, 60);
+}
+async function uniqueSlug(base: string) {
+  let s = slugify(base) || 'company';
+  let i = 1;
+  while (await prisma.employer.findUnique({ where: { slug: s } })) {
+    s = `${slugify(base)}-${i++}`;
+  }
+  return s;
+}
+function addInterval(from: Date, unit: 'month' | 'year') {
+  const d = new Date(from);
+  if (unit === 'year') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d;
+}
+function trialWindow(days: number, from = new Date()) {
+  const end = new Date(from);
+  end.setDate(end.getDate() + Math.max(0, days));
+  return { start: from, end };
+}
+
 /* ================== /auth/me & /me ================== */
-/** Selalu kembalikan employer.displayName; fallback ke admin.fullName/legalName bila kosong */
 async function handleMe(req: Request, res: Response) {
   const auth = await resolveEmployerAuth(req);
   if (!auth?.employerId) {
@@ -118,7 +146,6 @@ async function handleMe(req: Request, res: Response) {
     return res.status(404).json({ ok: false, message: 'Employer not found' });
   }
 
-  // ✅ gunakan adminUserId (bukan employerAdminUserId)
   const adminUserId = auth.adminUserId;
   const admin = adminUserId
     ? await prisma.employerAdminUser
@@ -154,6 +181,204 @@ async function handleMe(req: Request, res: Response) {
 
 employerRouter.get('/auth/me', handleMe);
 employerRouter.get('/me', handleMe);
+
+/* ================== STEP 1: buat akun employer + admin owner ================== */
+employerRouter.post('/step1', async (req, res) => {
+  try {
+    const {
+      companyName,
+      displayName,
+      email,
+      password,
+      confirmPassword,
+      website,
+      agree,
+    } = req.body || {};
+
+    if (!companyName || !email || !password || !confirmPassword) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: 'Password mismatch' });
+    }
+    if (agree !== true) {
+      return res.status(400).json({ error: 'You must agree to the Terms' });
+    }
+
+    const slug = await uniqueSlug(displayName || companyName);
+    const hash = await bcrypt.hash(password, 10);
+
+    const employer = await prisma.employer.create({
+      data: {
+        slug,
+        legalName: companyName,
+        displayName: displayName || companyName,
+        website: website || null,
+        admins: {
+          create: {
+            email,
+            passwordHash: hash,
+            isOwner: true,
+          },
+        },
+        profile: { create: {} },
+      },
+      include: { admins: true },
+    });
+
+    return res.json({ ok: true, employerId: employer.id, slug: employer.slug });
+  } catch (e: any) {
+    if (e?.code === 'P2002') {
+      return res.status(409).json({ error: 'Email or slug already exists' });
+    }
+    console.error('step1 error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+/* ================== STEP 2: update profil ================== */
+employerRouter.post('/step2', async (req, res) => {
+  try {
+    const { employerId, ...profile } = req.body || {};
+    if (!employerId) return res.status(400).json({ error: 'employerId required' });
+
+    await prisma.employerProfile.upsert({
+      where: { employerId },
+      update: {
+        industry: profile.industry ?? undefined,
+        size: profile.size ?? undefined,
+        foundedYear: profile.foundedYear ?? undefined,
+        about: profile.about ?? undefined,
+        hqCity: profile.hqCity ?? undefined,
+        hqCountry: profile.hqCountry ?? undefined,
+        logoUrl: profile.logoUrl ?? undefined,
+        bannerUrl: profile.bannerUrl ?? undefined,
+      },
+      create: {
+        employerId,
+        industry: profile.industry ?? null,
+        size: profile.size ?? null,
+        foundedYear: profile.foundedYear ?? null,
+        about: profile.about ?? null,
+        hqCity: profile.hqCity ?? null,
+        hqCountry: profile.hqCountry ?? null,
+        logoUrl: profile.logoUrl ?? null,
+        bannerUrl: profile.bannerUrl ?? null,
+      },
+    });
+
+    await prisma.employer.update({
+      where: { id: employerId },
+      data: { onboardingStep: 'VERIFY' },
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('step2 error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+/* ================== STEP 3: pilih paket (trial/gratis/berbayar) ================== */
+/**
+ * Body: { employerId, planSlug }
+ * Result:
+ *  - { ok: true, mode: 'trial', trialEndsAt }
+ *  - { ok: true, mode: 'free_active', premiumUntil }
+ *  - { ok: true, mode: 'needs_payment' }
+ */
+employerRouter.post('/step3', async (req, res) => {
+  try {
+    const { employerId, planSlug } = req.body as { employerId: string; planSlug: string };
+    if (!employerId || !planSlug) return res.status(400).json({ error: 'employerId & planSlug required' });
+
+    const employer = await prisma.employer.findUnique({ where: { id: employerId } });
+    if (!employer) return res.status(404).json({ error: 'Employer not found' });
+
+    const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
+    if (!plan || !plan.active) return res.status(400).json({ error: 'Plan not available' });
+
+    const amount = Number(plan.amount ?? 0);
+
+    // 1) Trial > 0 → langsung trial
+    if ((plan.trialDays ?? 0) > 0) {
+      const { start, end } = trialWindow(plan.trialDays);
+      await prisma.employer.update({
+        where: { id: employerId },
+        data: {
+          currentPlanId: plan.id,
+          billingStatus: 'trial',
+          trialStartedAt: start,
+          trialEndsAt: end,
+          onboardingStep: 'VERIFY',
+        },
+      });
+      return res.json({ ok: true, mode: 'trial', trialEndsAt: end.toISOString() });
+    }
+
+    // 2) Gratis → langsung aktif untuk 1 interval
+    if (amount === 0) {
+      const now = new Date();
+      const periodEnd = addInterval(now, (plan.interval as 'month' | 'year') || 'month');
+
+      await prisma.$transaction([
+        prisma.employer.update({
+          where: { id: employerId },
+          data: {
+            currentPlanId: plan.id,
+            billingStatus: 'active',
+            premiumUntil: periodEnd,
+            trialStartedAt: null,
+            trialEndsAt: null,
+            onboardingStep: 'VERIFY',
+          },
+        }),
+        prisma.subscription.create({
+          data: {
+            employerId,
+            planId: plan.id,
+            status: 'active',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+          },
+        }),
+      ]);
+
+      return res.json({ ok: true, mode: 'free_active', premiumUntil: periodEnd.toISOString() });
+    }
+
+    // 3) Berbayar tanpa trial → perlu checkout
+    await prisma.employer.update({
+      where: { id: employerId },
+      data: { currentPlanId: plan.id, onboardingStep: 'VERIFY' },
+    });
+    return res.json({ ok: true, mode: 'needs_payment' });
+  } catch (e) {
+    console.error('step3 error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+/* ================== STEP 5: submit verifikasi ================== */
+employerRouter.post('/step5', async (req, res) => {
+  try {
+    const { employerId, note } = req.body || {};
+    if (!employerId) return res.status(400).json({ error: 'employerId required' });
+
+    await prisma.verificationRequest.create({
+      data: {
+        employerId,
+        status: 'pending',
+        note: note ?? null,
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('step5 error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
 
 /* ================== Upload logo ================== */
 const uploadsRoot = path.join(process.cwd(), 'public', 'uploads');
@@ -224,3 +449,4 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
 });
 
 export default employerRouter;
+    

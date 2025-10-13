@@ -1,4 +1,3 @@
-// src/routes/payments.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { createSnapForPlan, handleMidtransNotification } from '../services/midtrans';
@@ -15,7 +14,7 @@ function getMaybeUserId(req: Request): string | undefined {
 
 const r = Router();
 
-/* ================= Utils: serialize angka aman ================= */
+/* ================= Utils: number & periode ================= */
 function toNumberSafe(v: any): number | null {
   if (v == null) return null;
   if (typeof v === 'number') return v;
@@ -23,6 +22,18 @@ function toNumberSafe(v: any): number | null {
   if (typeof v === 'bigint') return Number(v); // BigInt
   if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) return Number(v);
   return Number(v);
+}
+
+function addInterval(from: Date, unit: 'month' | 'year') {
+  const d = new Date(from);
+  if (unit === 'year') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d;
+}
+function trialWindow(days: number, from = new Date()) {
+  const end = new Date(from);
+  end.setDate(end.getDate() + Math.max(0, days));
+  return { start: from, end };
 }
 
 /* ================= LIST (admin/inbox) ================= */
@@ -44,7 +55,7 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
         orderId: true,
         status: true,           // settlement | pending | capture | cancel | expire | deny | refund | failure
         method: true,
-        grossAmount: true,      // Decimal/BigInt
+        grossAmount: true,      // BigInt
         currency: true,
         createdAt: true,
         transactionId: true,
@@ -98,12 +109,12 @@ r.get('/plans', async (_req: Request, res: Response, next: NextFunction) => {
         slug: true,
         name: true,
         description: true,
-        amount: true,     // Decimal/BigInt
+        amount: true,     // BigInt
         currency: true,
         interval: true,
         active: true,
         priceId: true,
-        // paymentLinkUrl: true, // aktifkan jika ada kolomnya di schema
+        trialDays: true,
       },
     });
 
@@ -117,33 +128,115 @@ r.get('/plans', async (_req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+/**
+ * ================= STEP 3: pilih paket (tangani trial/gratis) =================
+ * Body: { employerId, planSlug }
+ * Hasil:
+ * - { ok: true, mode: 'trial', trialEndsAt }
+ * - { ok: true, mode: 'free_active', premiumUntil }
+ * - { ok: true, mode: 'needs_payment' }
+ */
+r.post('/employers/step3', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { employerId, planSlug } = req.body as { employerId: string; planSlug: string };
+    if (!employerId || !planSlug) return res.status(400).json({ error: 'employerId & planSlug required' });
+
+    const employer = await prisma.employer.findUnique({ where: { id: employerId } });
+    if (!employer) return res.status(404).json({ error: 'Employer not found' });
+
+    const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
+    if (!plan || !plan.active) return res.status(400).json({ error: 'Plan not available' });
+
+    // Trial > 0 → langsung trial, tanpa pembayaran
+    if ((plan.trialDays ?? 0) > 0) {
+      const { start, end } = trialWindow(plan.trialDays);
+      await prisma.employer.update({
+        where: { id: employerId },
+        data: {
+          currentPlanId: plan.id,
+          billingStatus: 'trial',
+          trialStartedAt: start,
+          trialEndsAt: end,
+          onboardingStep: 'VERIFY',
+        },
+      });
+      return res.json({ ok: true, mode: 'trial', trialEndsAt: end.toISOString() });
+    }
+
+    // Gratis (amount == 0) → langsung active (tanpa bayar)
+    if ((toNumberSafe(plan.amount) ?? 0) === 0) {
+      const now = new Date();
+      const periodEnd = addInterval(now, (plan.interval as 'month' | 'year') || 'month');
+
+      await prisma.$transaction([
+        prisma.employer.update({
+          where: { id: employerId },
+          data: {
+            currentPlanId: plan.id,
+            billingStatus: 'active',
+            premiumUntil: periodEnd,
+            trialStartedAt: null,
+            trialEndsAt: null,
+            onboardingStep: 'VERIFY',
+          },
+        }),
+        prisma.subscription.create({
+          data: {
+            employerId,
+            planId: plan.id,
+            status: 'active',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+          },
+        }),
+      ]);
+
+      return res.json({ ok: true, mode: 'free_active', premiumUntil: periodEnd.toISOString() });
+    }
+
+    // Berbayar & tanpa trial → lanjut ke checkout
+    await prisma.employer.update({
+      where: { id: employerId },
+      data: { currentPlanId: plan.id, onboardingStep: 'VERIFY' },
+    });
+    res.json({ ok: true, mode: 'needs_payment' });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /* ================= CHECKOUT (buat transaksi Snap) ================= */
 r.post('/checkout', requireAuth, async (req: Request, res: Response) => {
   try {
     const { planId, employerId, customer, enabledPayments } = (req.body ?? {}) as any;
     if (!planId) return res.status(400).json({ error: 'Invalid params: planId required' });
 
+    const plan = await prisma.plan.findFirst({
+      where: { OR: [{ id: planId }, { slug: planId }], active: true },
+      select: { id: true, slug: true, name: true, amount: true, currency: true, interval: true, trialDays: true },
+    });
+    if (!plan) return res.status(400).json({ error: 'Plan not available' });
+
+    // Tolak checkout untuk plan gratis (tidak diperlukan)
+    if ((toNumberSafe(plan.amount) ?? 0) === 0) {
+      return res.status(400).json({ error: 'Free plan does not require checkout' });
+    }
+
     const maybeUserId = getMaybeUserId(req);
 
     const tx = await createSnapForPlan({
-      planId,
+      planId: plan.id,
       userId: maybeUserId ?? null,
       employerId,
       customer,
       enabledPayments,
     });
 
-    // isi nominal utk UI (optional)
-    const plan = await prisma.plan.findFirst({
-      where: { OR: [{ id: planId }, { slug: planId }] },
-      select: { amount: true, currency: true },
-    });
-
     res.json({
       token: (tx as any).token,
       redirect_url: (tx as any).redirect_url,
       orderId: (tx as any).order_id,
-      amount: plan ? toNumberSafe((plan as any).amount) ?? undefined : undefined,
+      amount: toNumberSafe((plan as any).amount) ?? undefined,
       currency: plan?.currency ?? 'IDR',
     });
   } catch (e: any) {

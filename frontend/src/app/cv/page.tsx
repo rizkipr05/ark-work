@@ -1,7 +1,7 @@
 // src/app/cv/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 
@@ -411,7 +411,7 @@ function EducationEditor({
 }
 
 /* =========================================================
-   PREVIEW building blocks
+   PREVIEW building blocks (grid 1fr auto utk tanggal)
 ========================================================= */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
@@ -430,9 +430,15 @@ function ExpPreview({ items }: { items: ExpItem[] }) {
         const bullets = (it.bullets || '').split('\n').map(s => s.trim()).filter(Boolean);
         return (
           <div key={it.id} className="break-inside-avoid">
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-[13px] font-semibold text-neutral-900">{it.title}</p>
-              {right ? <p className="shrink-0 text-[12px] text-neutral-600">{right}</p> : null}
+            <div className="grid grid-cols-[1fr_auto] items-start gap-3">
+              <p className="text-[13px] font-semibold text-neutral-900 min-w-0 break-words">
+                {it.title}
+              </p>
+              {right ? (
+                <p className="text-[12px] text-neutral-600 whitespace-nowrap tabular-nums justify-self-end">
+                  {right}
+                </p>
+              ) : null}
             </div>
             {(it.org || it.tag) && (
               <p className="mt-0.5 text-[12.5px] text-neutral-700">
@@ -459,9 +465,15 @@ function EduPreview({ items }: { items: EduItem[] }) {
         const right = rangeToText(undefined, it.startYear, undefined, it.endYear, it.present);
         return (
           <div key={it.id} className="break-inside-avoid">
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-[13px] font-semibold text-neutral-900">{it.school}</p>
-              {right ? <p className="shrink-0 text-[12px] text-neutral-600">{right}</p> : null}
+            <div className="grid grid-cols-[1fr_auto] items-start gap-3">
+              <p className="text-[13px] font-semibold text-neutral-900 min-w-0 break-words">
+                {it.school}
+              </p>
+              {right ? (
+                <p className="text-[12px] text-neutral-600 whitespace-nowrap tabular-nums justify-self-end">
+                  {right}
+                </p>
+              ) : null}
             </div>
             {(it.degree || it.gpa) && (
               <p className="mt-0.5 text-[12.5px] text-neutral-700">
@@ -476,7 +488,7 @@ function EduPreview({ items }: { items: EduItem[] }) {
 }
 
 /* =========================================================
-   Modal Preview + Download PDF
+   Modal Preview + Download PDF (A4 fix & anti terpotong)
 ========================================================= */
 function AtsCvModal({
   onClose,
@@ -496,10 +508,19 @@ function AtsCvModal({
 
     await html2pdf()
       .set({
-        margin: [12, 14],
+        margin: 0, // padding di .cv-a4 sudah jadi margin cetak
         filename: `${filenameSafe}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: el.scrollWidth,
+          windowHeight: el.scrollHeight,
+          letterRendering: true,
+        },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       })
       .from(el)
@@ -525,7 +546,7 @@ function AtsCvModal({
 
         {/* A4 content */}
         <div className="cv-scroll max-h-[82vh] overflow-auto p-4 print:p-0">
-          <div className="cv-a4 mx-auto bg-white shadow">
+          <div className="cv-a4 mx-auto bg-white shadow avoid-break">
             {/* HEADER */}
             <header className="px-9 pt-10 pb-4 border-b border-neutral-300">
               <h1 className="text-[18px] font-extrabold tracking-widest uppercase text-neutral-900">
@@ -543,17 +564,17 @@ function AtsCvModal({
 
             {/* BODY */}
             <section className="px-9 py-6">
-              <section className="mb-5 break-inside-avoid">
+              <section className="mb-5 break-inside-avoid avoid-break">
                 <SectionTitle>PENGALAMAN</SectionTitle>
                 <ExpPreview items={data.experiences} />
               </section>
 
-              <section className="mb-5 break-inside-avoid">
+              <section className="mb-5 break-inside-avoid avoid-break">
                 <SectionTitle>PENDIDIKAN</SectionTitle>
                 <EduPreview items={data.educations} />
               </section>
 
-              <section className="mb-5 break-inside-avoid">
+              <section className="mb-5 break-inside-avoid avoid-break">
                 <SectionTitle>KEAHLIAN</SectionTitle>
                 <div className="space-y-1.5 text-[13px] leading-6 text-neutral-800">
                   <p><span className="font-semibold">Hard Skills</span> : {hardSkills || '—'}</p>
@@ -565,29 +586,35 @@ function AtsCvModal({
         </div>
       </div>
 
-      {/* PRINT CSS */}
+      {/* PRINT & A4 CSS */}
       <style jsx global>{`
+        /* Box sizing konsisten agar lebar pas */
+        .cv-a4, .cv-a4 * { box-sizing: border-box; }
+
+        /* Ukuran A4 persis */
         .cv-a4{
-          width: 794px;      /* ~A4 @96dpi */
-          min-height: 1123px;
+          width: 210mm;
+          min-height: 297mm;
+          padding: 12mm 14mm; /* ini jadi margin cetak */
+          background: #fff;
           border: 1px solid #e5e7eb;
           border-radius: 12px;
           box-shadow: 0 10px 30px rgba(0,0,0,.06);
-          background: #fff;
         }
+        .avoid-break { page-break-inside: avoid; }
+
         @media print {
           .print\\:hidden,
           [data-modal-chrome],
           body > div[role="dialog"] > div:first-child { display: none !important; }
           .cv-scroll{ max-height: none !important; overflow: visible !important; padding: 0 !important; }
           .cv-a4{
-            width: 210mm !important; min-height: 297mm !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
             border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
-            page-break-inside: avoid;
           }
-          @page { size: A4; margin: 12mm 14mm; }
-          .cv-a4 section, .cv-a4 header { page-break-inside: avoid; }
+          @page { size: A4; margin: 0; } /* margin 0: pakai padding sebagai margin */
         }
       `}</style>
     </div>

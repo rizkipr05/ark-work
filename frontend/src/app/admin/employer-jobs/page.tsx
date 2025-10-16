@@ -222,7 +222,7 @@ export default function AdminEmployerJobsPage() {
   };
 
   const softDeleteJob = async (id: string) => {
-    if (!confirm('Hapus (soft) job ini?')) return;
+    if (!confirm('Delete job ini?')) return; // <= ubah teks konfirmasi
     setBusy(id, true);
     try {
       const tries = [
@@ -241,37 +241,7 @@ export default function AdminEmployerJobsPage() {
         }
         logs.push(res.msg);
       }
-      alert(`Gagal menghapus (soft) job.\n\n${logs.join('\n')}`);
-    } finally {
-      setBusy(id, false);
-    }
-  };
-
-  const hardDeleteJob = async (id: string) => {
-    if (!confirm('PERINGATAN: Hapus permanen. Lanjut?')) return;
-    setBusy(id, true);
-    try {
-      const tries = [
-        () => tryFetch(api(`/api/employer-jobs/${id}`), { method: 'DELETE' }),
-        () => tryFetch(api(`/api/jobs/${id}`), { method: 'DELETE' }),
-        () => tryFetch(api(`/api/admin/employer-jobs/${id}?mode=hard`), { method: 'DELETE' }),
-        () => tryFetch(api(`/api/employer-jobs/${id}/hard-delete`), { method: 'POST' }),
-      ];
-      const logs: string[] = [];
-      for (const go of tries) {
-        const res = await go();
-        if (res.ok) {
-          setItems((arr) => arr.filter((j) => j.id !== id));
-          if (detailJob?.id === id) setDetailOpen(false);
-          return;
-        }
-        logs.push(res.msg);
-      }
-      alert(
-        `Gagal hard delete job.\n\n${logs.join(
-          '\n',
-        )}\nCatatan: jika DB menolak karena relasi, gunakan Hapus (Soft).`,
-      );
+      alert(`Gagal delete job.\n\n${logs.join('\n')}`); // <= ubah teks alert
     } finally {
       setBusy(id, false);
     }
@@ -307,7 +277,7 @@ export default function AdminEmployerJobsPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold">Admin · Moderasi Job Employer</h1>
-          <p className="text-sm text-neutral-600">Aktifkan/nonaktifkan, atau hapus postingan job.</p>
+          <p className="text-sm text-neutral-600">Aktifkan/nonaktifkan, atau delete postingan job.</p> {/* <= ubah copy */}
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -398,14 +368,7 @@ export default function AdminEmployerJobsPage() {
                         onClick={(e) => { e.stopPropagation(); softDeleteJob(j.id); }}
                         className="rounded-xl border px-2.5 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
-                        Hapus (Soft)
-                      </button>
-                      <button
-                        disabled={busy}
-                        onClick={(e) => { e.stopPropagation(); hardDeleteJob(j.id); }}
-                        className="rounded-xl border px-2.5 py-1 text-sm text-red-700 hover:bg-red-100 disabled:opacity-50"
-                      >
-                        Hard Delete
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -424,7 +387,6 @@ export default function AdminEmployerJobsPage() {
           onActivate={() => activateJob(detailJob.id)}
           onDeactivate={() => deactivateJob(detailJob.id)}
           onSoftDelete={() => softDeleteJob(detailJob.id)}
-          onHardDelete={() => hardDeleteJob(detailJob.id)}
           busy={!!rowBusy[detailJob.id]}
         />
       )}
@@ -440,7 +402,6 @@ function DetailModal({
   onActivate,
   onDeactivate,
   onSoftDelete,
-  onHardDelete,
 }: {
   job: AdminJob;
   busy: boolean;
@@ -448,7 +409,6 @@ function DetailModal({
   onActivate: () => void;
   onDeactivate: () => void;
   onSoftDelete: () => void;
-  onHardDelete: () => void;
 }) {
   const active = (typeof job.isActive === 'boolean' ? job.isActive : (job.status ?? '').toLowerCase() === 'active');
 
@@ -487,8 +447,7 @@ function DetailModal({
             <div className="flex items-center justify-end gap-2">
               <button disabled={busy || active} onClick={onActivate} className="rounded-xl border px-2.5 py-1 text-sm hover:bg-gray-50 disabled:opacity-50">Aktifkan</button>
               <button disabled={busy || !active} onClick={onDeactivate} className="rounded-xl border px-2.5 py-1 text-sm hover:bg-gray-50 disabled:opacity-50">Nonaktifkan</button>
-              <button disabled={busy} onClick={onSoftDelete} className="rounded-xl border px-2.5 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50">Hapus (Soft)</button>
-              <button disabled={busy} onClick={onHardDelete} className="rounded-xl border px-2.5 py-1 text-sm text-red-700 hover:bg-red-100 disabled:opacity-50">Hard Delete</button>
+              <button disabled={busy} onClick={onSoftDelete} className="rounded-xl border px-2.5 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
             </div>
           </div>
         </div>

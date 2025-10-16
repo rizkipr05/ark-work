@@ -1,3 +1,4 @@
+// backend/src/lib/mailer.ts
 import nodemailer from 'nodemailer';
 
 const SMTP_HOST = process.env.SMTP_HOST || '';
@@ -17,14 +18,19 @@ export const transporter = nodemailer.createTransport({
   auth: { user: SMTP_USER, pass: SMTP_PASS },
 });
 
-export async function sendMail(opts: { to: string | string[]; subject: string; html?: string; text?: string; }) {
-  const to = Array.isArray(opts.to) ? opts.to.join(',') : opts.to;
+export async function sendEmail(
+  to: string | string[],
+  subject: string,
+  html?: string,
+  text?: string
+) {
+  const toHeader = Array.isArray(to) ? to.join(',') : to;
   const info = await transporter.sendMail({
     from: SMTP_FROM,
-    to,
-    subject: opts.subject,
-    text: opts.text,
-    html: opts.html,
+    to: toHeader,
+    subject,
+    text,
+    html,
   });
   return info;
 }

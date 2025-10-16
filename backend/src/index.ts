@@ -30,7 +30,13 @@ import adminJobsRouter from './routes/admin-jobs';
 // DEV helper routes (mis. set cookie emp_session, dll)
 import authDev from './routes/auth-dev';
 
+// 🔔 Dev mail testing (GET /dev/mail/try?employerId=...&type=trial|paid|warn3|warn1|expired)
+import devBillingMailRouter from './routes/dev-billing-mail';
+
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
+
+/** 🔔 IMPORTANT: aktifkan CRON billing (warning + recompute) */
+import './jobs/billingCron'; // <-- cukup di-import agar jadwalnya terdaftar
 
 const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -77,13 +83,13 @@ function isVercel(origin?: string) {
 
 const corsOptions: cors.CorsOptions = {
   origin(origin, cb) {
+    // server-to-server (mis. Midtrans webhook) biasanya tanpa Origin → izinkan
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin) || isLocalhost(origin) || isVercel(origin)) return cb(null, true);
     return cb(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  // include keduanya (case-insensitive di spec, tapi aman).
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id', 'x-employer-id'],
 };
 app.use(cors(corsOptions));
@@ -129,6 +135,9 @@ app.get('/healthz', (_req, res) => res.json({ ok: true })); // alias
 app.use(authDev);
 
 /* ================= ROUTES (ORDER MATTERS!) ================= */
+
+// Dev billing mail testing
+app.use(devBillingMailRouter);
 
 // Employer Applications (list & patch)
 app.use('/api/employers/applications', employerApplicationsRouter);
@@ -197,6 +206,8 @@ function startServer(port: number) {
     console.log(`🚀 Backend listening on http://localhost:${port}`);
     console.log(`NODE_ENV           : ${NODE_ENV}`);
     console.log(`FRONTEND_ORIGIN(s) : ${allowedOrigins.join(', ')}`);
+    console.log('✅ Billing CRON     : loaded (via import ./jobs/billingCron)');
+    console.log('✅ Dev mail route   : GET /dev/mail/try');
     console.log('========================================');
   });
 }

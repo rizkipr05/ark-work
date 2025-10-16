@@ -8,6 +8,12 @@ import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 
+// ⬇️ gunakan service billing agar email terkirim
+import {
+  startTrial,                 // startTrial({ employerId, planId, trialDays }) -> { trialEndsAt: Date }
+  activatePremium,            // activatePremium({ employerId, planId, interval, baseFrom? }) -> { premiumUntil: Date }
+} from '../services/billing';
+
 export const employerRouter = Router();
 
 /* ================== TYPE AUGMENTATION ================== */
@@ -118,17 +124,6 @@ async function uniqueSlug(base: string) {
     s = `${slugify(base)}-${i++}`;
   }
   return s;
-}
-function addInterval(from: Date, unit: 'month' | 'year') {
-  const d = new Date(from);
-  if (unit === 'year') d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
-  return d;
-}
-function trialWindow(days: number, from = new Date()) {
-  const end = new Date(from);
-  end.setDate(end.getDate() + Math.max(0, days));
-  return { start: from, end };
 }
 
 /* ================== /auth/me & /me ================== */
@@ -298,60 +293,46 @@ employerRouter.post('/step3', async (req, res) => {
     const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
     if (!plan || !plan.active) return res.status(400).json({ error: 'Plan not available' });
 
-    const amount = Number(plan.amount ?? 0);
-
-    // 1) Trial > 0 → langsung trial
+    // === TRIAL → gunakan service (email terkirim di dalamnya)
     if ((plan.trialDays ?? 0) > 0) {
-      const { start, end } = trialWindow(plan.trialDays);
+      const { trialEndsAt } = await startTrial({
+        employerId,
+        planId: plan.id,
+        trialDays: plan.trialDays,
+      });
+
       await prisma.employer.update({
         where: { id: employerId },
-        data: {
-          currentPlanId: plan.id,
-          billingStatus: 'trial',
-          trialStartedAt: start,
-          trialEndsAt: end,
-          onboardingStep: 'VERIFY',
-        },
+        data: { onboardingStep: 'VERIFY' },
       });
-      return res.json({ ok: true, mode: 'trial', trialEndsAt: end.toISOString() });
+
+      return res.json({ ok: true, mode: 'trial', trialEndsAt: trialEndsAt.toISOString() });
     }
 
-    // 2) Gratis → langsung aktif untuk 1 interval
+    const amount = Number(plan.amount ?? 0);
+
+    // === GRATIS → aktifkan premium via service (email terkirim di dalamnya)
     if (amount === 0) {
-      const now = new Date();
-      const periodEnd = addInterval(now, (plan.interval as 'month' | 'year') || 'month');
+      const { premiumUntil } = await activatePremium({
+        employerId,
+        planId: plan.id,
+        interval: (plan.interval as 'month' | 'year') || 'month',
+      });
 
-      await prisma.$transaction([
-        prisma.employer.update({
-          where: { id: employerId },
-          data: {
-            currentPlanId: plan.id,
-            billingStatus: 'active',
-            premiumUntil: periodEnd,
-            trialStartedAt: null,
-            trialEndsAt: null,
-            onboardingStep: 'VERIFY',
-          },
-        }),
-        prisma.subscription.create({
-          data: {
-            employerId,
-            planId: plan.id,
-            status: 'active',
-            currentPeriodStart: now,
-            currentPeriodEnd: periodEnd,
-          },
-        }),
-      ]);
+      await prisma.employer.update({
+        where: { id: employerId },
+        data: { onboardingStep: 'VERIFY' },
+      });
 
-      return res.json({ ok: true, mode: 'free_active', premiumUntil: periodEnd.toISOString() });
+      return res.json({ ok: true, mode: 'free_active', premiumUntil: premiumUntil.toISOString() });
     }
 
-    // 3) Berbayar tanpa trial → perlu checkout
+    // === BERBAYAR & tanpa trial → perlu checkout (email akan dikirim via webhook Midtrans setelah sukses)
     await prisma.employer.update({
       where: { id: employerId },
       data: { currentPlanId: plan.id, onboardingStep: 'VERIFY' },
     });
+
     return res.json({ ok: true, mode: 'needs_payment' });
   } catch (e) {
     console.error('step3 error', e);
@@ -449,4 +430,3 @@ employerRouter.post('/profile/logo', upload.single('file'), async (req, res) => 
 });
 
 export default employerRouter;
-    

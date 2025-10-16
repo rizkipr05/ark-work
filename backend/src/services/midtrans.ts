@@ -1,5 +1,7 @@
+// backend/src/services/midtrans.ts
 import midtransClient from 'midtrans-client';
 import { prisma } from '../lib/prisma';
+import { activatePremium, recomputeBillingStatus } from './billing';
 
 /* ================= ENV & Guards ================= */
 
@@ -7,9 +9,9 @@ import { prisma } from '../lib/prisma';
 const IS_PRODUCTION =
   String(
     process.env.MIDTRANS_PRODUCTION ??
-    process.env.MIDTRANS_PROD ??
-    process.env.MIDTRANS_IS_PROD ??
-    'false'
+      process.env.MIDTRANS_PROD ??
+      process.env.MIDTRANS_IS_PROD ??
+      'false',
   ).toLowerCase() === 'true';
 
 const MIDTRANS_SERVER_KEY = String(process.env.MIDTRANS_SERVER_KEY || '').trim();
@@ -29,7 +31,7 @@ const looksSBClient = MIDTRANS_CLIENT_KEY.startsWith('SB-');
 if (!IS_PRODUCTION && (!looksSBServer || !looksSBClient)) {
   console.warn(
     '[Midtrans] Mode SANDBOX (MIDTRANS_PRODUCTION=false), tetapi key tampak non-SB. ' +
-      'Pastikan key yang dipakai memang milik environment Sandbox & merchant yang sama.'
+      'Pastikan key yang dipakai memang milik environment Sandbox & merchant yang sama.',
   );
 }
 if (IS_PRODUCTION && (looksSBServer || looksSBClient)) {
@@ -63,8 +65,15 @@ export type MidtransNotificationPayload = {
   gross_amount: string; // string dari Midtrans
   signature_key: string;
   transaction_status:
-    | 'capture' | 'settlement' | 'pending' | 'deny' | 'cancel'
-    | 'expire' | 'failure' | 'refund' | 'chargeback';
+    | 'capture'
+    | 'settlement'
+    | 'pending'
+    | 'deny'
+    | 'cancel'
+    | 'expire'
+    | 'failure'
+    | 'refund'
+    | 'chargeback';
   payment_type?: string;
   fraud_status?: 'accept' | 'challenge' | 'deny';
   transaction_id?: string;
@@ -157,7 +166,6 @@ export async function createSnapForPlan(params: CreateSnapForPlanParams) {
     payload.enabled_payments = enabledPayments;
   }
 
-  // Log ringan untuk diagnosa (cek di server)
   console.log('[Midtrans] createTransaction payload:', {
     isProduction: IS_PRODUCTION,
     orderId,
@@ -167,7 +175,7 @@ export async function createSnapForPlan(params: CreateSnapForPlanParams) {
 
   let res: { token: string; redirect_url: string };
   try {
-    res = await snap.createTransaction(payload) as any;
+    res = (await snap.createTransaction(payload)) as any;
   } catch (e: any) {
     const api = e?.ApiResponse;
     console.error('[Midtrans] createTransaction error:', api || e);
@@ -187,7 +195,7 @@ export async function createSnapForPlan(params: CreateSnapForPlanParams) {
       employerId: employerId ?? null,
       userId: userId ?? null,
       currency: 'IDR',
-      grossAmount: BigInt(grossAmount), // <== penting untuk Prisma BigInt
+      grossAmount: BigInt(grossAmount),
       status: 'pending',
       token: res.token,
       redirectUrl: res.redirect_url,
@@ -201,6 +209,7 @@ export async function createSnapForPlan(params: CreateSnapForPlanParams) {
 export async function handleMidtransNotification(raw: any) {
   const p = raw as MidtransNotificationPayload;
 
+  // payload basic guard
   for (const k of ['order_id', 'status_code', 'gross_amount', 'signature_key']) {
     if (!p || typeof (p as any)[k] !== 'string' || !(p as any)[k]) {
       return { ok: false, reason: 'BAD_PAYLOAD', k };
@@ -208,12 +217,28 @@ export async function handleMidtransNotification(raw: any) {
   }
   if (!verifySignature(p)) return { ok: false, reason: 'INVALID_SIGNATURE' };
 
-  const status = mapStatus(p);
+  const mapped = mapStatus(p);
 
+  // Ambil payment yang relevan + status lama untuk idempotency
+  const pay = await prisma.payment.findUnique({
+    where: { orderId: p.order_id },
+    select: {
+      id: true,
+      status: true,
+      employerId: true,
+      planId: true,
+    },
+  });
+
+  if (!pay) {
+    console.warn('[Midtrans] notify for unknown order_id=', p.order_id);
+  }
+
+  // Update selalu (agar jejak status terakhir tercatat)
   await prisma.payment.updateMany({
     where: { orderId: p.order_id },
     data: {
-      status,
+      status: mapped,
       method: p.payment_type ?? undefined,
       transactionId: p.transaction_id ?? undefined,
       fraudStatus: p.fraud_status ?? undefined,
@@ -221,5 +246,36 @@ export async function handleMidtransNotification(raw: any) {
     },
   });
 
-  return { ok: true, order_id: p.order_id, status };
+  // Jika sukses & belum pernah settlement → aktifkan premium
+  const isSuccess =
+    mapped === 'settlement' || (p.transaction_status === 'capture' && p.fraud_status === 'accept');
+
+  if (isSuccess && pay && pay.status !== 'settlement') {
+    try {
+      // ambil plan untuk interval
+      const plan = await prisma.plan.findUnique({
+        where: { id: pay.planId! },
+        select: { id: true, interval: true },
+      });
+
+      if (pay.employerId && plan?.interval) {
+        console.log('[Midtrans] Activating premium for employer', pay.employerId, 'interval=', plan.interval);
+        await activatePremium({
+          employerId: pay.employerId,
+          planId: plan.id,
+          interval: (plan.interval as 'month' | 'year') || 'month',
+        });
+        await recomputeBillingStatus(pay.employerId);
+      } else {
+        console.warn(
+          '[Midtrans] Cannot activate premium. employerId or plan.interval missing',
+          { employerId: pay?.employerId, planId: plan?.id, interval: plan?.interval },
+        );
+      }
+    } catch (e) {
+      console.error('[Midtrans] activatePremium failed:', e);
+    }
+  }
+
+  return { ok: true, order_id: p.order_id, status: mapped };
 }

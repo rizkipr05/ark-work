@@ -5,13 +5,12 @@ import { createSnapForPlan, handleMidtransNotification } from '../services/midtr
 import {
   startTrial,                 // startTrial({ employerId, planId, trialDays })
   activatePremium,            // activatePremium({ employerId, planId, interval, baseFrom? })
+  extendPremium,              // ⬅️ dipakai untuk settlement webhook
   recomputeBillingStatus,     // recomputeBillingStatus(employerId)
 } from '../services/billing';
-import { sendEmail } from '../lib/mailer';
 
-/* ================= Auth placeholder (sesuaikan dengan sistemmu) ================= */
+/* ================= Auth placeholder ================= */
 function requireAuth(_req: any, _res: Response, next: NextFunction) {
-  // contoh: req.user = { id: 'user-123', employerId: 'emp-456' }
   return next();
 }
 function getMaybeUserId(req: Request): string | undefined {
@@ -30,9 +29,7 @@ function toNumberSafe(v: any): number | null {
   if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) return Number(v);
   return Number(v);
 }
-function looksEmail(s?: string | null) {
-  return !!s && /^\S+@\S+\.\S+$/.test(String(s).trim());
-}
+const looksEmail = (s?: string | null) => !!s && /^\S+@\S+\.\S+$/.test(String(s).trim());
 
 /* ================= LIST (admin/inbox) ================= */
 r.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -40,7 +37,6 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const take = Math.min(Math.max(Number(req.query.take ?? 20), 1), 100);
     const cursor = (req.query.cursor as string | undefined) ?? undefined;
     const status = (req.query.status as string | undefined)?.trim();
-
     const where = status ? { status } : undefined;
 
     const rows = await prisma.payment.findMany({
@@ -51,9 +47,9 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
       select: {
         id: true,
         orderId: true,
-        status: true,            // settlement | pending | capture | cancel | expire | deny | refund | failure
+        status: true,
         method: true,
-        grossAmount: true,       // BigInt
+        grossAmount: true,
         currency: true,
         createdAt: true,
         transactionId: true,
@@ -71,9 +67,7 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
       currency: p.currency ?? 'IDR',
       createdAt: p.createdAt?.toISOString?.() ?? new Date(p.createdAt as any).toISOString(),
       transactionId: p.transactionId ?? null,
-      plan: p.plan
-        ? { id: p.plan.id, slug: p.plan.slug, name: p.plan.name, interval: p.plan.interval }
-        : null,
+      plan: p.plan ? { id: p.plan.id, slug: p.plan.slug, name: p.plan.name, interval: p.plan.interval } : null,
       employer: p.employer
         ? { id: p.employer.id, displayName: p.employer.displayName, legalName: p.employer.legalName, slug: p.employer.slug }
         : null,
@@ -86,46 +80,27 @@ r.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-/* ================= PUBLIC PLANS (signup step) ================= */
-r.get('/plans', async (_req: Request, res: Response, next: NextFunction) => {
+/* ================= PUBLIC PLANS ================= */
+r.get('/plans', async (_req, res, next) => {
   try {
     const plans = await prisma.plan.findMany({
       where: { active: true },
       orderBy: [{ amount: 'asc' }, { id: 'asc' }],
       select: {
-        id: true,
-        slug: true,
-        name: true,
-        description: true,
-        amount: true,
-        currency: true,
-        interval: true,
-        active: true,
-        priceId: true,
-        trialDays: true,
+        id: true, slug: true, name: true, description: true, amount: true, currency: true,
+        interval: true, active: true, priceId: true, trialDays: true,
       },
     });
 
-    const serialized = plans.map((p) => ({
-      ...p,
-      amount: toNumberSafe(p.amount) ?? 0,
-    }));
-    res.json(serialized);
+    res.json(plans.map((p) => ({ ...p, amount: toNumberSafe(p.amount) ?? 0 })));
   } catch (e) {
     next(e);
   }
 });
 
 /**
- * ================= STEP 3: pilih paket (tangani trial/gratis) =================
- * Body: {
- *   employerId, planSlug,
- *   contact?: { email?: string; name?: string }   // <-- fallback penerima pertama
- * }
- * Hasil:
- * - { ok: true, mode: 'trial', trialEndsAt }
- * - { ok: true, mode: 'free_active', premiumUntil }
- * - { ok: true, mode: 'needs_payment' }
+ * STEP 3 pilih paket (tangani trial/gratis)
+ * Body: { employerId, planSlug, contact?: { email?: string; name?: string } }
  */
 r.post('/employers/step3', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -137,9 +112,7 @@ r.post('/employers/step3', async (req: Request, res: Response, next: NextFunctio
 
     console.log('[payments/step3] in →', { employerId, planSlug, contact });
 
-    if (!employerId || !planSlug) {
-      return res.status(400).json({ error: 'employerId & planSlug required' });
-    }
+    if (!employerId || !planSlug) return res.status(400).json({ error: 'employerId & planSlug required' });
 
     const employer = await prisma.employer.findUnique({
       where: { id: employerId },
@@ -150,52 +123,32 @@ r.post('/employers/step3', async (req: Request, res: Response, next: NextFunctio
     const plan = await prisma.plan.findUnique({ where: { slug: planSlug } });
     if (!plan || !plan.active) return res.status(400).json({ error: 'Plan not available' });
 
-    // helper → pastikan ada minimal 1 admin. Kalau belum ada dan contact.email valid, buat.
+    // --- Helper: pastikan ada minimal satu admin (pakai email dari form kalau belum ada)
     async function ensureAtLeastOneAdmin(): Promise<string[]> {
       const admins = await prisma.employerAdminUser.findMany({
         where: { employerId },
         select: { email: true },
       });
-      let emails = admins.map(a => a.email).filter(looksEmail) as string[];
+      let emails = admins.map((a) => a.email).filter(looksEmail) as string[];
 
       if (emails.length === 0 && looksEmail(contact?.email)) {
-        try {
-          await prisma.employerAdminUser.create({
-            data: {
-              employerId,
-              email: contact!.email!.trim().toLowerCase(),
-              // kolom opsional lain: name/role dsb. Cast as any agar aman
-              name: contact?.name || 'Admin',
-              role: (undefined as any),
-            } as any,
-          });
-          emails = [contact!.email!.trim().toLowerCase()];
-          console.log('[payments/step3] created fallback admin:', emails[0]);
-        } catch (err) {
-          console.warn('[payments/step3] create fallback admin failed:', err);
-        }
+        const email = contact!.email!.trim().toLowerCase();
+        await prisma.employerAdminUser.create({
+          data: { employerId, email, name: contact?.name || 'Admin' } as any,
+        });
+        emails = [email];
+        console.log('[payments/step3] created admin fallback →', email);
       }
-      return Array.from(new Set(emails));
-    }
 
-    // quick HTML builders
-    const htmlTrial = (until: Date) => `
-      <div style="font-family:Inter,Arial,sans-serif">
-        <h2>Trial aktif ✅</h2>
-        <p>Halo tim <b>${employer.displayName}</b>,</p>
-        <p>Paket <b>trial</b> aktif sampai <b>${until.toLocaleDateString('id-ID')}</b>.</p>
-        <p>Selamat mencoba fitur ArkWork! 🎉</p>
-      </div>`;
-    const htmlPremium = (until: Date) => `
-      <div style="font-family:Inter,Arial,sans-serif">
-        <h2>Premium aktif ✅</h2>
-        <p>Halo tim <b>${employer.displayName}</b>,</p>
-        <p>Langganan <b>premium</b> aktif sampai <b>${until.toLocaleDateString('id-ID')}</b>.</p>
-        <p>Terima kasih telah berlangganan ArkWork 🙌</p>
-      </div>`;
+      emails = Array.from(new Set(emails.map((e) => e.toLowerCase().trim())));
+      console.log('[payments/step3] recipients →', emails);
+      return emails;
+    }
 
     // ====== TRIAL
     if ((plan.trialDays ?? 0) > 0) {
+      await ensureAtLeastOneAdmin();
+
       const { trialEndsAt } = await startTrial({
         employerId,
         planId: plan.id,
@@ -207,27 +160,15 @@ r.post('/employers/step3', async (req: Request, res: Response, next: NextFunctio
         data: { onboardingStep: 'VERIFY' },
       });
 
-      // pastikan ada penerima untuk email-email berikutnya
-      const recipients = await ensureAtLeastOneAdmin();
-
-      // fallback: kalau baru saja dibuat (belum sempat terkirim dari service),
-      // kirim langsung ke email fallback
-      if (recipients.length === 1 && contact?.email === recipients[0]) {
-        try {
-          await sendEmail(recipients, 'Trial ArkWork Anda aktif', htmlTrial(new Date(trialEndsAt)));
-          console.log('[payments/step3] sent trial mail (fallback) →', recipients[0]);
-        } catch (e) {
-          console.warn('[payments/step3] fallback trial mail error:', e);
-        }
-      }
-
       console.log('[payments/step3] result → TRIAL', { trialEndsAt });
       return res.json({ ok: true, mode: 'trial', trialEndsAt: new Date(trialEndsAt).toISOString() });
     }
 
-    // ====== GRATIS (amount == 0) → langsung premium aktif
+    // ====== GRATIS (amount == 0)
     const amount = toNumberSafe(plan.amount) ?? 0;
     if (amount <= 0) {
+      await ensureAtLeastOneAdmin();
+
       const { premiumUntil } = await activatePremium({
         employerId,
         planId: plan.id,
@@ -239,26 +180,16 @@ r.post('/employers/step3', async (req: Request, res: Response, next: NextFunctio
         data: { onboardingStep: 'VERIFY' },
       });
 
-      const recipients = await ensureAtLeastOneAdmin();
-      if (recipients.length === 1 && contact?.email === recipients[0]) {
-        try {
-          await sendEmail(recipients, 'Pembayaran berhasil — Premium aktif', htmlPremium(new Date(premiumUntil)));
-          console.log('[payments/step3] sent premium mail (fallback) →', recipients[0]);
-        } catch (e) {
-          console.warn('[payments/step3] fallback premium mail error:', e);
-        }
-      }
-
       console.log('[payments/step3] result → FREE_ACTIVE', { premiumUntil });
       return res.json({ ok: true, mode: 'free_active', premiumUntil: new Date(premiumUntil).toISOString() });
     }
 
-    // ====== BERBAYAR & tanpa trial → perlu checkout
+    // ====== BERBAYAR & tanpa trial → checkout
     await prisma.employer.update({
       where: { id: employerId },
       data: { currentPlanId: plan.id, onboardingStep: 'VERIFY' },
     });
-    await ensureAtLeastOneAdmin(); // siapkan penerima untuk email webhook nanti
+    await ensureAtLeastOneAdmin(); // supaya email dari webhook Midtrans nanti punya penerima
     console.log('[payments/step3] result → NEEDS_PAYMENT');
     res.json({ ok: true, mode: 'needs_payment' });
   } catch (e) {
@@ -266,7 +197,7 @@ r.post('/employers/step3', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
-/* ================= CHECKOUT (buat transaksi Snap) ================= */
+/* ================= CHECKOUT (Midtrans Snap) ================= */
 r.post('/checkout', requireAuth, async (req: Request, res: Response) => {
   try {
     const { planId, employerId, customer, enabledPayments } = (req.body ?? {}) as any;
@@ -278,7 +209,6 @@ r.post('/checkout', requireAuth, async (req: Request, res: Response) => {
     });
     if (!plan) return res.status(400).json({ error: 'Plan not available' });
 
-    // Tolak checkout untuk plan gratis
     if ((toNumberSafe(plan.amount) ?? 0) === 0) {
       return res.status(400).json({ error: 'Free plan does not require checkout' });
     }
@@ -310,16 +240,38 @@ r.post('/midtrans/notify', async (req: Request, res: Response) => {
   try {
     const result = await handleMidtransNotification(req.body);
 
-    // Sesudah update payment, recompute status employer terkait (jika ada).
-    const orderId = (req.body?.order_id ?? '') as string;
+    // === (1) Settlement → aktifkan/extend premium ===
+    if ((result as any)?.ok && (result as any)?.status === 'settlement') {
+      const orderId = String(req.body?.order_id || '');
+
+      // Ambil payment & plan untuk tahu employer + interval
+      const payment = await prisma.payment.findUnique({
+        where: { orderId },
+        select: { employerId: true, planId: true },
+      });
+
+      if (payment?.employerId && payment?.planId) {
+        const plan = await prisma.plan.findUnique({
+          where: { id: payment.planId },
+          select: { interval: true },
+        });
+
+        const interval = (plan?.interval as 'month' | 'year') || 'month';
+        console.log('[Midtrans Notify] settlement → extendPremium', { employerId: payment.employerId, interval });
+
+        await extendPremium({ employerId: payment.employerId, interval });
+      }
+    }
+
+    // === (2) Recompute status setelah update payment/premium ===
+    const orderId = String(req.body?.order_id || '');
     if (orderId) {
-      const pay = await prisma.payment.findUnique({
+      const p = await prisma.payment.findUnique({
         where: { orderId },
         select: { employerId: true },
       });
-      const employerId = pay?.employerId ?? undefined;
-      if (employerId) {
-        await recomputeBillingStatus(employerId);
+      if (p?.employerId) {
+        await recomputeBillingStatus(p.employerId);
       }
     }
 
@@ -329,7 +281,7 @@ r.post('/midtrans/notify', async (req: Request, res: Response) => {
   } catch (e) {
     console.error('Midtrans notify error:', e);
   }
-  // selalu 200 agar Midtrans tidak spam retry
+  // Selalu 200 agar Midtrans tidak retry terus-menerus
   res.status(200).json({ ok: true });
 });
 

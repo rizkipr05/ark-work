@@ -5,6 +5,15 @@ import { useRef } from 'react';
 import Card from './Card';
 import { CompanyProfile } from '../types';
 
+function normalizeEmail(v: string) {
+  return v.trim().toLowerCase();
+}
+function normalizeUrl(u: string) {
+  const v = u.trim();
+  if (!v) return '';
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`;
+}
+
 export default function Step1Profile({
   profile, setProfile, error, onNext,
 }: {
@@ -56,7 +65,8 @@ export default function Step1Profile({
                   const f = e.target.files?.[0];
                   if (!f) return;
                   const reader = new FileReader();
-                  reader.onload = (ev) => setProfile((p) => ({ ...p, logo: String(ev.target?.result || '') }));
+                  reader.onload = (ev) =>
+                    setProfile((p) => ({ ...p, logo: String(ev.target?.result || '') }));
                   reader.readAsDataURL(f);
                 }}
               />
@@ -81,6 +91,7 @@ export default function Step1Profile({
               required
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="e.g. ArkWork Indonesia, Inc."
+              autoComplete="organization"
             />
           </label>
           <label className="block">
@@ -88,8 +99,14 @@ export default function Step1Profile({
             <input
               value={profile.email}
               onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
+              onBlur={(e) => {
+                const clean = normalizeEmail(e.target.value);
+                setProfile((p) => ({ ...p, email: clean }));
+              }}
               type="email"
               required
+              inputMode="email"
+              autoComplete="email"
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="hr@company.com"
             />
@@ -116,6 +133,7 @@ export default function Step1Profile({
               rows={3}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               placeholder="Jalan, nomor, dll."
+              autoComplete="street-address"
             />
           </label>
           <div className="grid gap-4">
@@ -126,6 +144,7 @@ export default function Step1Profile({
                 onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Jakarta Selatan"
+                autoComplete="address-level2"
               />
             </label>
             <label className="block">
@@ -133,8 +152,13 @@ export default function Step1Profile({
               <input
                 value={profile.website}
                 onChange={(e) => setProfile((p) => ({ ...p, website: e.target.value }))}
+                onBlur={(e) =>
+                  setProfile((p) => ({ ...p, website: e.target.value ? normalizeUrl(e.target.value) : '' }))
+                }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="company.com"
+                inputMode="url"
+                autoComplete="url"
               />
             </label>
           </div>
@@ -143,13 +167,15 @@ export default function Step1Profile({
         <div>
           <span className="mb-2 block text-sm font-medium text-slate-700">Website & Sosial</span>
           <div className="grid gap-3 sm:grid-cols-2">
-            {['website','linkedin','instagram','facebook','tiktok','youtube'].map((key) => (
+            {(['website','linkedin','instagram','facebook','tiktok','youtube'] as const).map((key) => (
               <input
                 key={key}
                 value={(profile.socials as any)[key] || ''}
                 onChange={(e) => setProfile((p) => ({ ...p, socials: { ...p.socials, [key]: e.target.value } }))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder={key[0].toUpperCase() + key.slice(1)}
+                inputMode={key === 'website' ? 'url' : 'text'}
+                autoComplete="off"
               />
             ))}
           </div>

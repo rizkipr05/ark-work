@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 /* ======================= CONFIG ======================= */
 const API_BASE =
@@ -24,6 +25,9 @@ const statusValues: Record<string, string> = {
   abaikan: 'DISMISSED',
 };
 
+/* ======================= TYPES ======================= */
+type TargetType = 'JOB' | 'EMPLOYER' | 'USER' | 'TENDER' | 'COMPANY' | 'OTHER';
+
 type ReportItem = {
   id: string;
   judul?: string | null;
@@ -31,11 +35,18 @@ type ReportItem = {
   alasan?: string | null;
   catatan?: string | null;
   status: keyof typeof statusLabels | string;
-  dibuatPada?: string | Date | null; // opsional
-  createdAt?: string | Date | null;  // fallback
+  dibuatPada?: string | Date | null;
+  createdAt?: string | Date | null;
+
+  /** dikirim backend */
+  targetUrl?: string | null;
+  targetType?: TargetType | null;
+  targetId?: string | number | null;
+  targetSlug?: string | null;
 };
 
 export default function AdminReportsPage() {
+  const router = useRouter();
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,12 +74,10 @@ export default function AdminReportsPage() {
     }
   };
 
-  // initial load
   useEffect(() => {
     load();
   }, []);
 
-  // dengarkan event dari dialog & storage ping
   useEffect(() => {
     function onCreated(ev: any) {
       const item = ev?.detail as ReportItem | undefined;
@@ -91,6 +100,37 @@ export default function AdminReportsPage() {
     };
   }, []);
 
+  /* ============== TARGET URL (deep-link ke baris list) ============== */
+  const toFocusUrl = (base: string, id?: string | number | null) =>
+    id ? `${base}?focus=${encodeURIComponent(String(id))}` : base;
+
+  const getTargetHref = (r: ReportItem): string | null => {
+    // 1) Jika backend sudah kasih URL — normalize ke ?focus= untuk employer-jobs
+    if (r.targetUrl && typeof r.targetUrl === 'string') {
+      // /admin/employer-jobs/123 -> /admin/employer-jobs?focus=123
+      const m = r.targetUrl.match(/^(.*\/admin\/employer-jobs)\/([^/?#]+)/i);
+      if (m) return toFocusUrl(m[1], m[2]);
+      // kalau sudah berupa ?focus= atau path lain, pakai apa adanya
+      return r.targetUrl;
+    }
+
+    // 2) Bangun dari tipe + id/slug
+    const id = r.targetSlug || r.targetId;
+    switch (r.targetType) {
+      case 'JOB':
+        return toFocusUrl('/admin/employer-jobs', id);
+      case 'EMPLOYER':
+      case 'COMPANY':
+        return toFocusUrl('/admin/user-management/employers', id);
+      case 'USER':
+        return toFocusUrl('/admin/user-management/users', id);
+      case 'TENDER':
+        return toFocusUrl('/admin/tenders', id);
+      default:
+        return null;
+    }
+  };
+
   /* ======================= LIST (filter) ======================= */
   const filtered = useMemo(() => {
     const items = Array.isArray(reports) ? reports : [];
@@ -104,7 +144,6 @@ export default function AdminReportsPage() {
   }, [reports, query]);
 
   /* ======================= ACTIONS ======================= */
-  // Kirim ENUM ke backend
   const updateStatus = async (id: string, enumStatus: string) => {
     try {
       await fetch(api(`/api/reports/${id}`), {
@@ -132,7 +171,7 @@ export default function AdminReportsPage() {
     }
   };
 
-  /* ======================= RENDER ======================= */
+  /* ======================= UI HELPERS ======================= */
   const badgeClass = (statusEnum: string) =>
     statusEnum === 'OPEN'
       ? 'bg-amber-100 text-amber-700'
@@ -153,6 +192,7 @@ export default function AdminReportsPage() {
     }
   };
 
+  /* ======================= RENDER ======================= */
   return (
     <main className="mx-auto max-w-6xl space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -193,30 +233,61 @@ export default function AdminReportsPage() {
             )}
 
             {filtered.map((r) => {
-              const enumStatus = String(r.status); // e.g. OPEN
-              const label = statusLabels[enumStatus] || enumStatus; // e.g. baru
+              const enumStatus = String(r.status);
+              const label = statusLabels[enumStatus] || enumStatus;
               const displayDate = fmtDate(r.dibuatPada ?? r.createdAt);
+              const targetHref = getTargetHref(r);
+
+              const goToTarget = () => {
+                if (targetHref) router.push(targetHref);
+              };
 
               return (
-                <tr key={r.id} className="border-t align-top">
-                  <td className="p-3 font-medium">{r.judul || '—'}</td>
+                <tr
+                  key={r.id}
+                  className={`border-t align-top ${targetHref ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                  onClick={(e) => {
+                    const tag = (e.target as HTMLElement).tagName;
+                    if (['SELECT', 'BUTTON', 'OPTION', 'A', 'INPUT', 'TEXTAREA', 'SVG', 'PATH'].includes(tag)) return;
+                    goToTarget();
+                  }}
+                >
+                  <td className="p-3 font-medium">
+                    {targetHref ? (
+                      <a
+                        href={targetHref}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {r.judul || '—'}
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-2">
+                        {r.judul || '—'}
+                        <span
+                          title="Target belum tersedia"
+                          className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600"
+                        >
+                          no target
+                        </span>
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3">{r.perusahaan || '—'}</td>
                   <td className="p-3">{r.alasan || '—'}</td>
                   <td className="p-3 max-w-[24rem]">
                     <div className="line-clamp-3">{r.catatan || '—'}</div>
                   </td>
                   <td className="p-3">
-                    <span className={`rounded-full px-2 py-1 text-xs ${badgeClass(enumStatus)}`}>
-                      {label}
-                    </span>
+                    <span className={`rounded-full px-2 py-1 text-xs ${badgeClass(enumStatus)}`}>{label}</span>
                   </td>
                   <td className="p-3 text-gray-500">{displayDate}</td>
                   <td className="p-3">
                     <div className="flex justify-end gap-2">
-                      {/* Dropdown tampil label, kirim ENUM */}
                       <select
                         value={label}
                         onChange={(e) => updateStatus(r.id, statusValues[e.target.value])}
+                        onClick={(e) => e.stopPropagation()}
                         className="rounded-xl border px-2 py-1"
                       >
                         <option value="baru">baru</option>
@@ -225,8 +296,21 @@ export default function AdminReportsPage() {
                         <option value="abaikan">abaikan</option>
                       </select>
 
+                      {targetHref && (
+                        <a
+                          href={targetHref}
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded-xl border px-2 py-1 hover:bg-gray-50"
+                        >
+                          Buka target
+                        </a>
+                      )}
+
                       <button
-                        onClick={() => remove(r.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          remove(r.id);
+                        }}
                         className="rounded-xl border px-2 py-1 hover:bg-gray-50"
                       >
                         Hapus

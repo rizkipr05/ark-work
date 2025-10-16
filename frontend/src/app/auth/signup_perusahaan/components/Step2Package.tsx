@@ -30,6 +30,7 @@ function classNames(...a: (string | false | null | undefined)[]) {
 function formatIDR(n: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 }
+const looksEmail = (s?: string | null) => !!s && /\S+@\S+\.\S+/.test(String(s));
 
 /* ================= Komponen ================= */
 export default function Step2Package({
@@ -91,17 +92,27 @@ export default function Step2Package({
       if (!selected) throw new Error('Silakan pilih paket.');
       if (!userId) throw new Error('User belum terautentikasi (userId tidak tersedia).');
 
-      /* === 1) Jika ini flow employer dan server izinkan trial/gratis, lewati pembayaran === */
+      /* === 1) Jika employer flow & server izinkan trial/gratis, lewati pembayaran === */
       if (employerId) {
-        const step3 = await fetch(`${API_BASE}/api/employers/step3`, {
+        if (!looksEmail(customerEmail)) {
+          throw new Error('Alamat email perusahaan tidak valid. Mohon isi email yang benar.');
+        }
+
+        // ⬇️ PERUBAHAN PENTING: endpoint sekarang /api/payments/employers/step3
+        const step3 = await fetch(`${API_BASE}/api/payments/employers/step3`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ employerId, planSlug: selected }),
+          body: JSON.stringify({
+            employerId,
+            planSlug: selected,
+            contact: { email: customerEmail, name: customerName }, // kirim agar BE bisa buat admin fallback
+          }),
         });
-        const result = (await step3.json()) as Step3Resp;
-        if (!step3.ok || !result?.ok) {
-          const msg = (result as any)?.error || (result as any)?.message || 'Gagal menetapkan paket.';
+
+        const result = (await step3.json()) as Step3Resp | any;
+        if (!step3.ok || result?.ok !== true) {
+          const msg = result?.error || result?.message || 'Gagal menetapkan paket.';
           throw new Error(msg);
         }
 
@@ -159,6 +170,7 @@ export default function Step2Package({
       onNext();
     } catch (e: any) {
       setError(e?.message || 'Gagal memproses pembayaran.');
+      console.error('[FE] handlePay error', e);
     } finally {
       setPaying(false);
     }
@@ -178,21 +190,18 @@ export default function Step2Package({
       <h2 className="text-2xl font-semibold text-slate-900">Pilih Paket</h2>
       <p className="mt-1 text-sm text-slate-600">Pilih paket sesuai kebutuhan. Bisa upgrade kapan saja.</p>
 
-      {/* Info Box (trial/gratis) */}
       {info && (
         <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
           {info}
         </div>
       )}
 
-      {/* Error Box */}
       {error && (
         <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
           {error}
         </div>
       )}
 
-      {/* Grid packages */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {packages.map((p) => {
           const active = p.id === selected;
@@ -228,7 +237,6 @@ export default function Step2Package({
         })}
       </div>
 
-      {/* Ringkasan & Aksi */}
       <div className="mt-6 rounded-2xl border border-slate-200 p-4">
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-600">Paket dipilih</span>

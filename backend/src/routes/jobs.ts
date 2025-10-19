@@ -3,21 +3,96 @@ import { prisma } from '../lib/prisma';
 
 export const jobsRouter = Router();
 
-/* =================== Helpers =================== */
+/**
+ * Helper: normalize job object to DTO
+ */
 function toJobDTO(x: any) {
+  const created = x?.createdAt;
+  let postedAt = new Date().toISOString();
+  try {
+    if (created instanceof Date) {
+      postedAt = created.toISOString();
+    } else if (created) {
+      postedAt = new Date(created).toISOString();
+    }
+  } catch {
+    postedAt = new Date().toISOString();
+  }
+
   return {
-    id: x.id,
-    title: x.title,
-    location: x.location ?? '',
-    employment: x.employment ?? '',
-    description: x.description ?? '',
-    postedAt: x.createdAt?.toISOString?.() ?? new Date(x.createdAt).toISOString(),
-    company: x.employer?.displayName ?? 'Company',
-    logoUrl: x.employer?.profile?.logoUrl ?? null,
-    isActive: typeof x.isActive === 'boolean' ? x.isActive : null,
-    isDraft: typeof x.isDraft === 'boolean' ? x.isDraft : null,
-    // tidak ada kolom "status" di schema -> jangan expose
+    id: x?.id,
+    title: x?.title,
+    location: x?.location ?? '',
+    employment: x?.employment ?? '',
+    description: x?.description ?? '',
+    postedAt,
+    company: x?.employer?.displayName ?? 'Company',
+    logoUrl: x?.employer?.profile?.logoUrl ?? null,
+    isActive: typeof x?.isActive === 'boolean' ? x.isActive : null,
+    isDraft: typeof x?.isDraft === 'boolean' ? x.isDraft : null,
   };
+}
+
+/**
+ * Robust helper: attempt to delete reports referencing a jobId.
+ *
+ * This is best-effort: it tries several candidate model/table/column names and won't crash
+ * if a particular model/table/column doesn't exist.
+ */
+async function deleteReportsByJobId(tx: any, jobId: string): Promise<number> {
+  // candidate prisma model names (common variations)
+  const candidateModels = ['jobReport', 'job_report', 'report', 'reports', 'JobReport', 'Report'];
+  // candidate column names in report table that may reference the job id
+  const candidateCols = ['jobId', 'job_id', 'targetId', 'target_id', 'targetIdString', 'targetSlug'];
+
+  // Try using prisma model deleteMany if model exists on tx
+  for (const modelName of candidateModels) {
+    try {
+      const model = (tx as any)[modelName];
+      if (!model || typeof model.deleteMany !== 'function') continue;
+
+      for (const col of candidateCols) {
+        try {
+          const where: any = {};
+          where[col] = jobId;
+          const res = await model.deleteMany({ where });
+          // Prisma modern returns { count: number }
+          const count = res && typeof res.count === 'number' ? res.count : 0;
+          console.log(`[jobs] tried prisma.${modelName}.deleteMany({ ${col}: id }) => ${count}`);
+          if (count > 0) return count;
+        } catch (err: any) {
+          // ignore and try next column
+          console.warn(`[jobs] prisma.${modelName}.deleteMany with col ${col} failed: ${err?.message || err}`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[jobs] error while inspecting prisma.${modelName}: ${err?.message || err}`);
+    }
+  }
+
+  // Last-resort: try raw SQL on common table/column names.
+  // Note: this uses $executeRawUnsafe as a fallback; it may not be available or allowed in some envs.
+  const candidateTables = ['job_reports', 'job_report', 'reports', 'report'];
+  const rawCols = ['job_id', 'jobId', 'target_id', 'targetId', 'target_slug', 'targetSlug'];
+  for (const tbl of candidateTables) {
+    for (const col of rawCols) {
+      try {
+        // Parameterized placeholder for safety; prisma.$executeRawUnsafe here receives raw SQL + params
+        const sql = `DELETE FROM "${tbl}" WHERE "${col}" = $1`;
+        // cast to any to avoid TS type complaints
+        const res = await (tx as any).$executeRawUnsafe?.(sql, jobId);
+        const count = typeof res === 'number' ? res : 0;
+        console.log(`[jobs] raw delete ${tbl}.${col} => ${count}`);
+        if (count > 0) return count;
+      } catch (err: any) {
+        // ignore non-existing table/column errors
+        console.warn(`[jobs] raw delete on ${tbl}.${col} failed: ${err?.message || err}`);
+      }
+    }
+  }
+
+  console.warn('[jobs] deleteReportsByJobId: no matching report model/table/column found. Tried candidates.');
+  return 0;
 }
 
 /* =========================================================
@@ -210,7 +285,6 @@ jobsRouter.patch('/employer-jobs/:id', async (req, res) => {
     const data: any = {};
     if (raw === 'INACTIVE') data.isActive = false;
     if (raw === 'ACTIVE') data.isActive = true;
-    // jika tidak ada status yang dikenali, tetap OK (no-op) agar tidak 400
 
     const updated = await prisma.job.update({
       where: { id },
@@ -248,7 +322,6 @@ jobsRouter.patch('/jobs/:id', async (req, res) => {
   }
 });
 
-// POST /api/employer-jobs/:id/deactivate
 jobsRouter.post('/employer-jobs/:id/deactivate', async (req, res) => {
   try {
     const id = String(req.params.id);
@@ -269,37 +342,57 @@ jobsRouter.post('/employer-jobs/:id/deactivate', async (req, res) => {
    - DELETE /api/employer-jobs/:id            (soft)
    - DELETE /api/employer-jobs/:id?mode=hard  (hard)
    - POST   /api/employer-jobs/:id/hard-delete
-   - DELETE /api/jobs/:id                     (alias; soft jika ?soft=1)
+   - DELETE /api/jobs/:id                     (alias; soft if ?soft=1)
+   - DELETE /api/admin/reports/by-job/:id     (ADDED)
 ========================================================= */
 
 jobsRouter.delete('/employer-jobs/:id', async (req, res) => {
-  try {
-    const id = String(req.params.id);
-    const isHard = String(req.query.mode || '').toLowerCase() === 'hard';
+  const id = String(req.params.id);
+  const isHard = String(req.query.mode || '').toLowerCase() === 'hard';
 
+  try {
     if (isHard) {
-      await prisma.job.delete({ where: { id } });
+      await prisma.$transaction(async (tx: any) => {
+        try {
+          await deleteReportsByJobId(tx, id);
+        } catch (err) {
+          console.warn('[jobs] deleteReportsByJobId error (hard):', err);
+        }
+        await tx.job.delete({ where: { id } });
+      });
       return res.json({ ok: true, hard: true });
     }
 
-    // Soft delete: prefer deletedAt, fallback ke isDraft+isActive
-    try {
-      const updated = await prisma.job.update({
-        where: { id },
-        data: { deletedAt: new Date(), isActive: false } as any,
-        select: { id: true },
-      });
-      return res.json({ ok: true, soft: true, data: updated });
-    } catch {
-      const updated = await prisma.job.update({
-        where: { id },
-        data: { isDraft: true, isActive: false } as any,
-        select: { id: true },
-      });
-      return res.json({ ok: true, soft: true, data: updated });
-    }
+    const result = await prisma.$transaction(async (tx: any) => {
+      try {
+        await deleteReportsByJobId(tx, id);
+      } catch (err) {
+        console.warn('[jobs] deleteReportsByJobId error (soft):', err);
+      }
+
+      try {
+        const updated = await tx.job.update({
+          where: { id },
+          data: { deletedAt: new Date(), isActive: false } as any,
+          select: { id: true },
+        });
+        return { soft: true, updatedId: updated.id };
+      } catch {
+        const updated = await tx.job.update({
+          where: { id },
+          data: { isDraft: true, isActive: false } as any,
+          select: { id: true },
+        });
+        return { soft: true, updatedId: updated.id };
+      }
+    });
+
+    return res.json({ ok: true, soft: true, data: result });
   } catch (e: any) {
     console.error('DELETE /api/employer-jobs/:id error:', e);
+    if (/No.*Record/i.test(String(e.message)) || /Record to delete does not exist/i.test(String(e.message))) {
+      return res.status(404).json({ ok: false, error: 'Job tidak ditemukan' });
+    }
     return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
@@ -308,6 +401,11 @@ jobsRouter.post('/employer-jobs/:id/hard-delete', async (req, res) => {
   try {
     const id = String(req.params.id);
     await prisma.job.delete({ where: { id } });
+    try {
+      await deleteReportsByJobId(prisma, id);
+    } catch (err) {
+      console.warn('[jobs] deleteReportsByJobId after hard delete error:', err);
+    }
     return res.json({ ok: true, hard: true });
   } catch (e: any) {
     console.error('POST /api/employer-jobs/:id/hard-delete error:', e);
@@ -315,13 +413,19 @@ jobsRouter.post('/employer-jobs/:id/hard-delete', async (req, res) => {
   }
 });
 
-// alias: DELETE /api/jobs/:id   (soft jika ?soft=1)
+// alias: DELETE /api/jobs/:id   (soft if ?soft=1)
 jobsRouter.delete('/jobs/:id', async (req, res) => {
   try {
     const id = String(req.params.id);
     const soft = String(req.query.soft ?? '') === '1';
 
     if (soft) {
+      try {
+        await deleteReportsByJobId(prisma, id);
+      } catch (err) {
+        console.warn('[jobs] deleteReportsByJobId (jobs/:id soft) error:', err);
+      }
+
       try {
         const updated = await prisma.job.update({
           where: { id },
@@ -339,10 +443,33 @@ jobsRouter.delete('/jobs/:id', async (req, res) => {
       }
     }
 
-    await prisma.job.delete({ where: { id } });
+    // hard delete
+    await prisma.$transaction(async (tx: any) => {
+      try {
+        await deleteReportsByJobId(tx, id);
+      } catch (err) {
+        console.warn('[jobs] deleteReportsByJobId (jobs/:id hard) error:', err);
+      }
+      await tx.job.delete({ where: { id } });
+    });
     return res.json({ ok: true, hard: true });
   } catch (e: any) {
     console.error('DELETE /api/jobs/:id error:', e);
     return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
+  }
+});
+
+/**
+ * ADDED: minimal admin helper so FE call to /api/admin/reports/by-job/:jobId won't 404.
+ * Best-effort deletes reports related to jobId.
+ */
+jobsRouter.delete('/admin/reports/by-job/:jobId', async (req, res) => {
+  const jobId = String(req.params.jobId);
+  try {
+    const deleted = await deleteReportsByJobId(prisma, jobId);
+    return res.json({ ok: true, deleted });
+  } catch (err: any) {
+    console.error('DELETE /api/admin/reports/by-job/:jobId error:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
   }
 });

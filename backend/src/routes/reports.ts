@@ -24,44 +24,9 @@ function mapReasonInput(r?: string): ReportReason {
   return (ReportReason[v] ?? ReportReason.OTHER) as ReportReason;
 }
 
-/** UBAH path ini jika route admin kamu berbeda */
-function buildTargetUrl(jobId: string | number | null | undefined): string | null {
-  if (!jobId) return null;
-  return `/admin/employer-jobs/${jobId}`;
-}
-
-/** Seragamkan shape response untuk FE */
-function toDto(r: any) {
-  const createdISO =
-    r?.createdAt?.toISOString?.() ??
-    (r?.createdAt ? new Date(r.createdAt).toISOString() : null);
-
-  return {
-    id: r.id,
-    judul: r.job?.title ?? '-',
-    perusahaan: r.job?.employer?.displayName ?? '-',
-    alasan: r.reason,
-    catatan: r.details ?? '',
-    status: r.status as ReportStatus,
-
-    // tanggal sesuai ekspektasi FE
-    dibuatPada: createdISO,
-    createdAt: createdISO,
-
-    // info target untuk link
-    targetType: 'JOB' as const,
-    targetId: r.jobId ?? null,
-    targetSlug: null as string | null, // tidak pakai slug
-    targetUrl: buildTargetUrl(r.jobId),
-  };
-}
-
 /* -------------------------- CREATE -------------------------- */
 /**
  * POST /api/reports
- * Body (salah satu):
- *  - { jobId, alasan?, catatan?, evidenceUrl?, reporterUserId?, reporterEmail? }
- *  - { judul, perusahaan, alasan?, catatan? } -> backend lookup jobId
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -74,20 +39,10 @@ router.post('/', async (req: Request, res: Response) => {
       evidenceUrl,
       reporterUserId,
       reporterEmail,
-    } = (req.body ?? {}) as {
-      jobId?: string;
-      judul?: string;
-      perusahaan?: string;
-      alasan?: string;
-      catatan?: string;
-      evidenceUrl?: string;
-      reporterUserId?: string;
-      reporterEmail?: string;
-    };
+    } = (req.body ?? {}) as any;
 
     let jobId = (rawJobId || '').trim();
 
-    // fallback cari job dari judul + perusahaan
     if (!jobId && judul && perusahaan) {
       const found = await prisma.job.findFirst({
         where: {
@@ -120,7 +75,18 @@ router.post('/', async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(201).json({ ok: true, data: toDto(created) });
+    return res.status(201).json({
+      ok: true,
+      data: {
+        id: created.id,
+        judul: created.job?.title ?? '-',
+        perusahaan: created.job?.employer?.displayName ?? '-',
+        alasan: created.reason,
+        catatan: created.details ?? '',
+        status: created.status,
+        dibuat: created.createdAt.toISOString(),
+      },
+    });
   } catch (e: any) {
     console.error('[reports] POST / error:', e);
     return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
@@ -130,7 +96,6 @@ router.post('/', async (req: Request, res: Response) => {
 /* ---------------------------- LIST --------------------------- */
 /**
  * GET /api/reports?q=
- * Return shape untuk tabel admin + link target
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -160,7 +125,21 @@ router.get('/', async (req: Request, res: Response) => {
       },
     });
 
-    const data = rows.map(toDto);
+    const data = rows.map((r) => ({
+      id: r.id,
+      judul: r.job?.title ?? '-',
+      perusahaan: r.job?.employer?.displayName ?? '-',
+      alasan: r.reason,
+      catatan: r.details ?? '',
+      status: r.status,
+      dibuat: r.createdAt?.toISOString?.() ?? new Date(r.createdAt).toISOString(),
+      // optional fields for frontend deep-linking
+      targetType: 'JOB',
+      targetId: r.jobId,
+      targetSlug: undefined,
+      targetUrl: `/admin/employer-jobs/${r.jobId}`,
+    }));
+
     return res.json({ ok: true, data });
   } catch (e: any) {
     console.error('[reports] GET / error:', e);
@@ -171,14 +150,12 @@ router.get('/', async (req: Request, res: Response) => {
 /* --------------------------- UPDATE -------------------------- */
 /**
  * PATCH /api/reports/:id
- * Body: { status?: 'baru'|'proses'|'tutup'|'abaikan'|ReportStatus, catatan?: string }
  */
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
     const status = mapStatusInput(req.body?.status);
-    const details =
-      typeof req.body?.catatan === 'string' ? (req.body.catatan as string) : undefined;
+    const details = typeof req.body?.catatan === 'string' ? (req.body.catatan as string) : undefined;
 
     const updated = await prisma.jobReport.update({
       where: { id },
@@ -192,14 +169,28 @@ router.patch('/:id', async (req: Request, res: Response) => {
       },
     });
 
-    return res.json({ ok: true, data: toDto(updated) });
+    return res.json({
+      ok: true,
+      data: {
+        id: updated.id,
+        judul: updated.job?.title ?? '-',
+        perusahaan: updated.job?.employer?.displayName ?? '-',
+        alasan: updated.reason,
+        catatan: updated.details ?? '',
+        status: updated.status,
+        dibuat: updated.createdAt.toISOString(),
+      },
+    });
   } catch (e: any) {
     console.error('[reports] PATCH /:id error:', e);
     return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });
 
-/* --------------------------- DELETE -------------------------- */
+/* --------------------------- DELETE (single) -------------------------- */
+/**
+ * DELETE /api/reports/:id
+ */
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
@@ -207,6 +198,28 @@ router.delete('/:id', async (req: Request, res: Response) => {
     return res.json({ ok: true });
   } catch (e: any) {
     console.error('[reports] DELETE /:id error:', e);
+    return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
+  }
+});
+
+/* --------------------------- DELETE BY JOB -------------------------- */
+/**
+ * DELETE /api/admin/reports/by-job/:jobId
+ * (frontend calls /api/admin/reports/by-job/:jobId)
+ *
+ * Hapus semua laporan yang menunjuk jobId tersebut.
+ */
+router.delete('/by-job/:jobId', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.jobId ?? '').trim();
+    if (!jobId) return res.status(400).json({ ok: false, error: 'jobId diperlukan' });
+
+    // deleteMany agar aman walau tidak ada record
+    const result = await prisma.jobReport.deleteMany({ where: { jobId } });
+
+    return res.json({ ok: true, deleted: result.count });
+  } catch (e: any) {
+    console.error('[reports] DELETE /by-job/:jobId error:', e);
     return res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
   }
 });

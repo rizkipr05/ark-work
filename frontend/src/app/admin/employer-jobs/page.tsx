@@ -221,6 +221,25 @@ export default function AdminEmployerJobsPage() {
     }
   };
 
+  // --- baru: helper untuk hapus laporan terkait job di backend
+  async function deleteReportsForJob(jobId: string) {
+    try {
+      const r = await fetch(api(`/api/admin/reports/by-job/${encodeURIComponent(jobId)}`), {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        console.warn('deleteReportsForJob failed:', r.status, txt);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('deleteReportsForJob error', e);
+      return false;
+    }
+  }
+
   const softDeleteJob = async (id: string) => {
     if (!confirm('Delete job ini?')) return; // <= ubah teks konfirmasi
     setBusy(id, true);
@@ -235,13 +254,48 @@ export default function AdminEmployerJobsPage() {
       for (const go of tries) {
         const res = await go();
         if (res.ok) {
+          // job berhasil dihapus di salah satu endpoint -> juga hapus report
+          const repOk = await deleteReportsForJob(id);
+          // beri tahu halaman reports untuk reload (listener storage ada di reports page)
+          try { localStorage.setItem('ark:report:ping', String(Date.now())); } catch {}
           setItems((arr) => arr.filter((j) => j.id !== id));
           if (detailJob?.id === id) setDetailOpen(false);
+          if (!repOk) {
+            alert('Job dihapus, namun gagal menghapus laporan terkait (cek console).');
+          }
           return;
         }
         logs.push(res.msg);
       }
       alert(`Gagal delete job.\n\n${logs.join('\n')}`); // <= ubah teks alert
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const hardDeleteJob = async (id: string) => {
+    if (!confirm('PERINGATAN: Hapus permanen. Lanjut?')) return;
+    setBusy(id, true);
+    try {
+      const tries = [
+        () => tryFetch(api(`/api/employer-jobs/${id}`), { method: 'DELETE' }),
+        () => tryFetch(api(`/api/jobs/${id}`), { method: 'DELETE' }),
+        () => tryFetch(api(`/api/admin/employer-jobs/${id}?mode=hard`), { method: 'DELETE' }),
+      ];
+      const logs: string[] = [];
+      for (const go of tries) {
+        const res = await go();
+        if (res.ok) {
+          // also delete reports
+          const repOk = await deleteReportsForJob(id);
+          try { localStorage.setItem('ark:report:ping', String(Date.now())); } catch {}
+          setItems((arr) => arr.filter((j) => j.id !== id));
+          if (!repOk) alert('Job dihapus, namun gagal menghapus laporan terkait (cek console).');
+          return;
+        }
+        logs.push(res.msg);
+      }
+      alert(`Gagal hard delete job.\n\n${logs.join('\n')}\nCatatan: kalau DB menolak karena relasi, gunakan Soft Delete.`);
     } finally {
       setBusy(id, false);
     }
@@ -277,7 +331,7 @@ export default function AdminEmployerJobsPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold">Admin · Moderasi Job Employer</h1>
-          <p className="text-sm text-neutral-600">Aktifkan/nonaktifkan, atau delete postingan job.</p> {/* <= ubah copy */}
+          <p className="text-sm text-neutral-600">Aktifkan/nonaktifkan, atau delete postingan job.</p>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -295,7 +349,7 @@ export default function AdminEmployerJobsPage() {
       {visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-10 text-center">
           <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-neutral-100 grid place-items-center">
-            <SearchIcon className="h-6 w-6 text-neutral-600" />
+            <svg className="h-6 w-6 text-neutral-600" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" /><path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
           </div>
           <h3 className="font-semibold text-neutral-900">Tidak ada data</h3>
           <p className="mt-1 text-sm text-neutral-600">Coba muat ulang atau ubah kata kunci pencarian.</p>
@@ -320,7 +374,7 @@ export default function AdminEmployerJobsPage() {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img alt={j.company || 'logo'} src={j.logoUrl} className="h-full w-full object-cover" />
                     ) : (
-                      initials(j.company || 'AW')
+                      <span className="select-none">{(j.company || 'AW').slice(0,2).toUpperCase()}</span>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -330,11 +384,7 @@ export default function AdminEmployerJobsPage() {
                         <p className="truncate text-sm text-neutral-600">{j.company || 'Perusahaan'}</p>
                       </div>
                       <span
-                        className={`rounded-lg px-2 py-1 text-xs ${
-                          active
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-300'
-                            : 'bg-amber-50 text-amber-700 border border-amber-300'
-                        }`}
+                        className={`rounded-lg px-2 py-1 text-xs ${active ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-amber-50 text-amber-700 border border-amber-300'}`}
                         title="Status"
                       >
                         {active ? 'active' : 'inactive'}
@@ -342,10 +392,10 @@ export default function AdminEmployerJobsPage() {
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[13px]">
-                      <Meta icon={<PinIcon className="h-4 w-4" />} text={j.location ?? '—'} />
-                      <Meta icon={<BriefcaseIcon className="h-4 w-4" />} text={j.employment ?? '—'} />
-                      <Meta icon={<LayersIcon className="h-4 w-4" />} text={j.employer?.id ? `EMP ${j.employer.id.slice(0, 6)}…` : '—'} />
-                      <Meta icon={<CalendarIcon className="h-4 w-4" />} text={fmtDate(j.postedAt)} />
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none"><path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2"/></svg><span className="truncate">{j.location ?? '—'}</span></div>
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2"/></svg><span className="truncate">{j.employment ?? '—'}</span></div>
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2"/></svg><span className="truncate">{j.employer?.id ? `EMP ${j.employer.id.slice(0,6)}…` : '—'}</span></div>
+                      <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M8 3v4M16 3v4M3 11h18" stroke="currentColor" strokeWidth="2"/></svg><span className="truncate">{j.postedAt ? new Date(j.postedAt).toLocaleDateString() : '—'}</span></div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
@@ -369,6 +419,14 @@ export default function AdminEmployerJobsPage() {
                         className="rounded-xl border px-2.5 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
                         Delete
+                      </button>
+                      <button
+                        disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); hardDeleteJob(j.id); }}
+                        className="rounded-xl border px-2.5 py-1 text-sm text-red-700 hover:bg-red-100 disabled:opacity-50"
+                        title="Hapus permanen"
+                      >
+                        Hard Delete
                       </button>
                     </div>
                   </div>
@@ -423,7 +481,7 @@ function DetailModal({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img alt={job.company || 'logo'} src={job.logoUrl} className="h-full w-full object-cover" />
               ) : (
-                initials(job.company || 'AW')
+                <span className="select-none">{(job.company || 'AW').slice(0,2).toUpperCase()}</span>
               )}
             </div>
             <div className="min-w-0">
@@ -436,10 +494,22 @@ function DetailModal({
           </div>
 
           <div className="px-5 py-4 space-y-2 text-sm">
-            <InfoRow icon={<PinIcon className="h-4 w-4" />} label="Lokasi" value={job.location ?? '—'} />
-            <InfoRow icon={<BriefcaseIcon className="h-4 w-4" />} label="Tipe/Kontrak" value={job.employment ?? '—'} />
-            <InfoRow icon={<LayersIcon className="h-4 w-4" />} label="Employer ID" value={job.employer?.id ?? '—'} />
-            <InfoRow icon={<CalendarIcon className="h-4 w-4" />} label="Dibuat" value={fmtDate(job.postedAt)} />
+            <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <span className="text-xs uppercase tracking-wide text-neutral-600">Lokasi</span>
+              <span className="text-sm font-medium text-neutral-900">{job.location ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <span className="text-xs uppercase tracking-wide text-neutral-600">Tipe/Kontrak</span>
+              <span className="text-sm font-medium text-neutral-900">{job.employment ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <span className="text-xs uppercase tracking-wide text-neutral-600">Employer ID</span>
+              <span className="text-sm font-medium text-neutral-900">{job.employer?.id ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <span className="text-xs uppercase tracking-wide text-neutral-600">Dibuat</span>
+              <span className="text-sm font-medium text-neutral-900">{job.postedAt ? new Date(job.postedAt).toLocaleDateString() : '—'}</span>
+            </div>
           </div>
 
           <div className="px-5 py-4 border-t border-neutral-200 grid grid-cols-2 gap-2">
@@ -453,89 +523,5 @@ function DetailModal({
         </div>
       </div>
     </div>
-  );
-}
-
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-      <span className="flex items-center gap-2 text-neutral-600">
-        <span>{icon}</span>
-        <span className="text-xs uppercase tracking-wide">{label}</span>
-      </span>
-      <span className="text-sm font-medium text-neutral-900">{value}</span>
-    </div>
-  );
-}
-
-/* ======================= SMALL UI ======================== */
-function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <div className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1">
-      <span className="text-neutral-600">{icon}</span>
-      <span className="truncate">{text}</span>
-    </div>
-  );
-}
-
-function fmtDate(v?: string | null) {
-  if (!v) return '—';
-  const d = new Date(v);
-  return isNaN(d.getTime())
-    ? '—'
-    : new Intl.DateTimeFormat('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      }).format(d);
-}
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-/* ======================= ICONS ======================== */
-function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-      <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function PinIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M12 22s7-4.5 7-11a7 7 0 10-14 0c0 6.5 7 11 7 11z" stroke="currentColor" strokeWidth="2" />
-      <circle cx="12" cy="11" r="2.5" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function LayersIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <path d="M12 3l8 4-8 4-8-4 8-4z" stroke="currentColor" strokeWidth="2" />
-      <path d="M4 11l8 4 8-4" stroke="currentColor" strokeWidth="2" />
-      <path d="M4 15l8 4 8-4" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function BriefcaseIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
-      <path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" stroke="currentColor" strokeWidth="2" />
-      <path d="M3 12h18" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" {...props}>
-      <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 3v4M16 3v4M3 11h18" stroke="currentColor" strokeWidth="2" />
-    </svg>
   );
 }

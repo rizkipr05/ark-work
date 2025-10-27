@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { listenJobsUpdated } from "@/lib/jobsSync"; // ⬅️ NEW: gunakan listener util
-import type { ReportDialogProps } from "@/app/admin/employers/jobs/_components/ReportDialog";
+import type { ReportDialogProps } from "../admin/(protected)/reports/ReportDialog";
 
 /* ---------------- Server base ---------------- */
 const API_BASE =
@@ -14,9 +14,10 @@ const API_BASE =
 
 /* -------- Report Dialog (dynamic supaya bukan RSC) -------- */
 const ReportDialog = dynamic<ReportDialogProps>(
-  () => import("@/app/admin/employers/jobs/_components/ReportDialog"),
+  () => import("../admin/(protected)/reports/ReportDialog"),
   { ssr: false }
 );
+
 
 
 /* ---------------- Types ---------------- */
@@ -197,8 +198,8 @@ export default function JobsPage() {
   const [detailJob, setDetailJob] = useState<Job | null>(null);
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportDefaults, setReportDefaults] = useState<{ judul?: string; perusahaan?: string; alasan?: string; catatan?: string; }>({});
-
+  const [jobToReport, setJobToReport] = useState<Job | null>(null); // Ganti reportDefaults
+  
   // CV states
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [isApplying, setIsApplying] = useState(false);
@@ -422,13 +423,8 @@ export default function JobsPage() {
   }
 
   function onReport(job: Job) {
-    setReportDefaults({
-      judul: job.title,
-      perusahaan: job.company ?? "",
-      alasan: "Spam / Penipuan",
-      catatan: "",
-    });
-    setReportOpen(true);
+    setJobToReport(job);   // Simpan seluruh objek job ke state
+    setReportOpen(true);   // Buka modal
   }
 
   return (
@@ -612,18 +608,27 @@ export default function JobsPage() {
       )}
 
       {/* Report Dialog */}
-      {reportOpen && (
-        <div className="fixed inset-0 z-[200]">
-          <ReportDialog
-            open={reportOpen}
-            onClose={() => setReportOpen(false)}
-            defaultData={reportDefaults}
-            onSubmitted={() => {
-              setReportOpen(false);
+      {jobToReport && ( // Render hanya jika jobToReport ada isinya
+        <ReportDialog
+          isOpen={reportOpen} // Ganti 'open' menjadi 'isOpen'
+          onClose={() => {
+            setReportOpen(false);
+            setJobToReport(null); // Reset state saat ditutup
+          }}
+          onSubmitted={() => {
+            setReportOpen(false);     // Langsung tutup modal
+            setJobToReport(null);    // Langsung reset state
+            // Tunda toast sebentar (misal 100ms)
+            setTimeout(() => {
               showToast("ok","Terima kasih. Laporanmu telah kami terima.");
-            }}
-          />
-        </div>
+            }, 100); // Penundaan 100 milidetik
+          }}
+          
+          // KIRIM PROPS YANG BENAR (BUKAN defaultData)
+          jobId={jobToReport.id}
+          jobTitle={jobToReport.title}
+          employerName={jobToReport.company ?? "Perusahaan"}
+        />
       )}
     </div>
   );

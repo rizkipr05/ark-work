@@ -1,3 +1,4 @@
+// backend/src/index.ts
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -5,8 +6,11 @@ import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import http from 'node:http';
 import morgan from 'morgan';
+import session from 'express-session';
+import passport from 'passport';
 
-import authRouter from './routes/auth';
+// Routes
+import authRouter from './routes/auth'; // ✅ pakai auth.ts (bukan auths)
 import newsRouter from './routes/news';
 import chatRouter from './routes/chat';
 import adminRouter from './routes/admin';
@@ -30,13 +34,15 @@ import adminJobsRouter from './routes/admin-jobs';
 // DEV helper routes (mis. set cookie emp_session, dll)
 import authDev from './routes/auth-dev';
 
-// 🔔 Dev mail testing (GET /dev/mail/try?employerId=...&type=trial|paid|warn3|warn1|expired)
+// 🔔 Dev mail testing
 import devBillingMailRouter from './routes/dev-billing-mail';
 
 import { authRequired, employerRequired, adminRequired } from './middleware/role';
 
-/** 🔔 IMPORTANT: aktifkan CRON billing (warning + recompute) */
-import './jobs/billingCron'; // <-- cukup di-import agar jadwalnya terdaftar
+// 🔔 Aktifkan CRON billing (warning + recompute)
+import './jobs/billingCron';
+
+// const googleRouter = require('./routes/google'); // ❌ jangan aktifkan dulu
 
 const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -71,6 +77,7 @@ function isLocalhost(origin?: string) {
     return false;
   }
 }
+
 function isVercel(origin?: string) {
   try {
     if (!origin) return false;
@@ -85,12 +92,22 @@ const corsOptions: cors.CorsOptions = {
   origin(origin, cb) {
     // server-to-server (mis. Midtrans webhook) biasanya tanpa Origin → izinkan
     if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin) || isLocalhost(origin) || isVercel(origin)) return cb(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      isLocalhost(origin) ||
+      isVercel(origin)
+    )
+      return cb(null, true);
     return cb(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Employer-Id', 'x-employer-id'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Employer-Id',
+    'x-employer-id',
+  ],
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
@@ -100,7 +117,30 @@ if (NODE_ENV === 'production') app.set('trust proxy', 1);
 
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
+
+/* Cookie parser */
 app.use(cookieParser());
+
+/* ====== Session & Passport (must be before route that uses passport) ====== */
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_session_secret';
+app.use(
+  session({
+    name: 'arkwork.sid',
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: NODE_ENV === 'production', // HTTPS in production
+      sameSite: NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+    },
+  })
+);
+
+// Initialize passport AFTER session middleware
+app.use(passport.initialize());
+app.use(passport.session());
 
 /* BigInt -> string (safe untuk res.json) */
 app.use((_req, res, next) => {
@@ -121,58 +161,51 @@ app.use((_req, res, next) => {
 });
 
 /* Log sederhana & static */
-app.use((req, _res, next) => { console.log(`${req.method} ${req.originalUrl}`); next(); });
+app.use((req, _res, next) => {
+  console.log(`${req.method} ${req.originalUrl}`);
+  next();
+});
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
 /* ========= HEALTH ========= */
 app.get('/', (_req, res) => res.send('OK'));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, status: 'healthy' }));
-app.get('/healthz', (_req, res) => res.json({ ok: true })); // alias
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-/* ========= DEV AUTH ROUTER =========
-   Penting: pasang SEBELUM router lain/guard agar endpoint dev auth tersedia awal. */
-app.use(authDev);
+/* ========= DEV ROUTES (only enabled if DEV_AUTH=1 and not production) ========= */
+if (NODE_ENV !== 'production' && process.env.DEV_AUTH === '1') {
+  app.use(authDev);
+  app.use(devBillingMailRouter);
+}
 
 /* ================= ROUTES (ORDER MATTERS!) ================= */
 
-// Dev billing mail testing
-app.use(devBillingMailRouter);
+/* Public / auth routes */
+app.use('/auth', authRouter); // ✅ pastikan file ini adalah ./routes/auth.ts
 
-// Employer Applications (list & patch)
+/* Employer */
+app.use('/api/employers/auth', employerAuthRouter);
+app.use('/api/employers', employerRouter);
 app.use('/api/employers/applications', employerApplicationsRouter);
 
-/* Auth kandidat/user */
-app.use('/auth', authRouter);
-
-/* Employer auth (signup/signin/signout/me) */
-app.use('/api/employers/auth', employerAuthRouter);
-
-/* Employer features (step1–5, profile, dll) */
-app.use('/api/employers', employerRouter);
-
-/* Admin & misc */
-app.use('/admin', adminRouter);
+/* Public APIs */
 app.use('/api/reports', reportsRouter);
 app.use('/api/news', newsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/rates', ratesRouter);
 app.use('/api/tenders', tendersRouter);
-app.use('/admin/tenders', adminTendersRouter);
-app.use('/admin/plans', adminPlansRouter);
 app.use('/api/payments', paymentsRouter);
-
-/* Jobs API (publik) */
 app.use('/api', jobsRouter);
-
-/* Admin Jobs API */
-app.use('/api', adminJobsRouter);
-app.use('/api/admin', adminJobsRouter);
-
-/* Applications API (user apply, dsb.) */
 app.use('/api', applicationsRouter);
 
-/* Protected examples */
+/* ========== ADMIN API (all admin endpoints under /api/admin/*) ========== */
+app.use('/api/admin', adminRouter);
+app.use('/api/admin/jobs', adminJobsRouter);
+app.use('/api/admin/tenders', adminTendersRouter);
+app.use('/api/admin/plans', adminPlansRouter);
+
+/* Example protected endpoints */
 app.get('/api/profile', authRequired, (req, res) =>
   res.json({ ok: true, whoami: (req as any).auth })
 );
@@ -186,7 +219,7 @@ app.post('/api/admin/stats', adminRequired, (_req, res) =>
 /* 404 */
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-/* Error (WAJIB 4 argumen) */
+/* Error handler (WAJIB 4 argumen) */
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled error:', err);
   if (err instanceof Error && err.message.startsWith('Not allowed by CORS')) {
@@ -197,7 +230,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(status).json({ error: msg });
 });
 
-/* Start */
+/* Start Server */
 function startServer(port: number) {
   const server = http.createServer(app);
   server.listen(port);
@@ -207,8 +240,13 @@ function startServer(port: number) {
     console.log(`NODE_ENV           : ${NODE_ENV}`);
     console.log(`FRONTEND_ORIGIN(s) : ${allowedOrigins.join(', ')}`);
     console.log('✅ Billing CRON     : loaded (via import ./jobs/billingCron)');
-    console.log('✅ Dev mail route   : GET /dev/mail/try');
+    if (NODE_ENV !== 'production' && process.env.DEV_AUTH === '1') {
+      console.log('✅ Dev mail route   : GET /dev/mail/try (dev only)');
+      console.log('✅ Dev auth routes  : enabled (dev only)');
+    }
+    console.log('✅ Passport-ready   : passport initialized and session enabled');
     console.log('========================================');
   });
 }
+
 startServer(DEFAULT_PORT);

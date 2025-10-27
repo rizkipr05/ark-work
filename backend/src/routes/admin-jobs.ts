@@ -1,24 +1,23 @@
 // backend/src/routes/admin-jobs.ts
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { requireAuth } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
 
 const router = Router();
 
+// Protect all routes in this router
+router.use(requireAuth, requireAdmin);
+
 /**
- * GET /api/admin/jobs
+ * GET /jobs
  * Query:
  *  - q=keyword
  *  - employerId=uuid
  *  - status=active|draft|hidden|deleted|all (default: active)
  *  - page=1&limit=20
- *
- * Tanpa kolom deletedAt:
- *  - "deleted" & "hidden": isActive=false && isDraft=false
- *  - "active":  isActive=true && isDraft=false
- *  - "draft":   isDraft=true
  */
-router.get("/admin/jobs", requireAdmin, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { q, employerId, status = "active", page = "1", limit = "20" } =
       req.query as Record<string, string>;
@@ -34,7 +33,6 @@ router.get("/admin/jobs", requireAdmin, async (req, res) => {
         { title: { contains: q, mode: "insensitive" } },
         { description: { contains: q, mode: "insensitive" } },
         { location: { contains: q, mode: "insensitive" } },
-        // cari juga di nama employer (relasi)
         { employer: { is: { displayName: { contains: q, mode: "insensitive" } } } },
       ];
     }
@@ -60,7 +58,6 @@ router.get("/admin/jobs", requireAdmin, async (req, res) => {
     const [items, total] = await Promise.all([
       prisma.job.findMany({
         where,
-        // PAKAI createdAt karena postedAt tidak ada di schema kamu
         orderBy: { createdAt: "desc" },
         take,
         skip,
@@ -69,9 +66,9 @@ router.get("/admin/jobs", requireAdmin, async (req, res) => {
           title: true,
           isActive: true,
           isDraft: true,
-          createdAt: true,       // ← digunakan di tabel admin
+          createdAt: true,
           employerId: true,
-          location: true,        // ← kolom yang ditampilkan di FE admin
+          location: true,
           employment: true,
           description: true,
           employer: { select: { id: true, displayName: true } },
@@ -88,10 +85,19 @@ router.get("/admin/jobs", requireAdmin, async (req, res) => {
 });
 
 /** SOFT DELETE = set isActive=false */
-router.delete("/admin/jobs/:id", requireAdmin, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const id = String(req.params.id);
+
+    // cek eksistensi
+    const job = await prisma.job.findUnique({ where: { id } });
+    if (!job) return res.status(404).json({ message: "Job not found" });
+
     await prisma.job.update({ where: { id }, data: { isActive: false } });
+
+    // audit log (opsional)
+    console.info(`[ADMIN] user=${(req as any).user?.userId ?? "unknown"} soft-deleted job=${id}`);
+
     res.status(204).end();
   } catch (e: any) {
     console.error("[soft delete] error:", e);
@@ -100,17 +106,24 @@ router.delete("/admin/jobs/:id", requireAdmin, async (req, res) => {
 });
 
 /** HARD DELETE = hapus permanen */
-router.delete("/admin/jobs/:id/hard", requireAdmin, async (req, res) => {
+router.delete("/:id/hard", async (req, res) => {
   try {
     const id = String(req.params.id);
+
+    const job = await prisma.job.findUnique({ where: { id } });
+    if (!job) return res.status(404).json({ message: "Job not found" });
+
     await prisma.$transaction(async (tx) => {
-      // Hapus child kalau FK RESTRICT (uncomment kalau perlu)
+      // Hapus child jika perlu
       // await tx.application.deleteMany({ where: { jobId: id } });
       // await tx.savedJob.deleteMany({ where: { jobId: id } });
       // await tx.jobReport.deleteMany({ where: { jobId: id } });
 
       await tx.job.delete({ where: { id } });
     });
+
+    console.info(`[ADMIN] user=${(req as any).user?.userId ?? "unknown"} hard-deleted job=${id}`);
+
     res.status(204).end();
   } catch (e: any) {
     console.error("[hard delete] error:", e);

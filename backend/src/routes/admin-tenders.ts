@@ -1,60 +1,93 @@
-// src/routes/admin-tenders.ts
-import { Router, Request, Response } from 'express';
-import { PrismaClient, Prisma } from '@prisma/client';
-import { adminRequired } from '../middleware/role';
+import { Router, Request, Response, NextFunction } from "express";
+import { PrismaClient, Prisma } from "@prisma/client";
+// ==========================================================
+// PERUBAHAN DI SINI: Ganti middleware
+// ==========================================================
+// import { requireAuth } from "../middleware/requireAuth";        // <-- HAPUS
+// import { requireAdmin } from "../middleware/requireAdmin";      // <-- HAPUS
+import { requireAuthJwt } from "../middleware/requireAuthJwt";    // <-- TAMBAHKAN
+import { requireAdminRole } from "../middleware/requireAdminRole"; // <-- TAMBAHKAN
+// ==========================================================
+import { prisma as sharedPrisma } from "../lib/prisma"; // jika kamu expose prisma named export
+// fallback to local if above not present (keamanan: gunakan shared client)
+const prisma: PrismaClient = (sharedPrisma as any) || new PrismaClient();
 
-const prisma = new PrismaClient();
 const router = Router();
 
 /* ---------------- helpers ---------------- */
 function toInt(v: unknown, def = 0): number {
   const n = Number(v);
-  return Number.isFinite(n) ? n : def;
+  return Number.isFinite(n) ? Math.trunc(n) : def;
 }
 function toDocs(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
-  if (typeof v === 'string') {
-    return v.split(',').map(s => s.trim()).filter(Boolean);
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof v === "string") {
+    return v.split(",").map((s) => s.trim()).filter(Boolean);
   }
   return [];
 }
 
 /* sanitize output tender row */
-function sanitizeTender(t: any) {
+// Middleware global di index.ts Anda sudah menangani BigInt ke string,
+// jadi fungsi sanitizeTender ini sebenarnya tidak lagi diperlukan
+// untuk konversi BigInt, tapi bisa dipertahankan untuk konversi Date.
+function sanitizeTenderOutput(t: any) {
   if (!t) return t;
   return {
     ...t,
-    budgetUSD: t.budgetUSD !== undefined && t.budgetUSD !== null
-      ? (typeof t.budgetUSD === 'bigint' ? t.budgetUSD.toString() : String(t.budgetUSD))
-      : null,
+    // budgetUSD sudah string karena middleware global
     deadline: t.deadline ? (t.deadline instanceof Date ? t.deadline.toISOString() : String(t.deadline)) : null,
     createdAt: t.createdAt ? (t.createdAt instanceof Date ? t.createdAt.toISOString() : String(t.createdAt)) : null,
     updatedAt: t.updatedAt ? (t.updatedAt instanceof Date ? t.updatedAt.toISOString() : String(t.updatedAt)) : null,
   };
 }
 
+/* ---------------- Protect all admin routes ----------------
+   Menggunakan middleware JWT
+*/
+// ==========================================================
+// PERUBAHAN DI SINI: Gunakan middleware baru
+// ==========================================================
+router.use(requireAuthJwt, requireAdminRole); // Pastikan urutan benar
+// ==========================================================
+
 /* -----------------------------------------------------------
  * Create tender (ADMIN ONLY)
- * POST /admin/tenders
+ * POST /
  * body: { title, buyer, sector, location, status, contract, budgetUSD, description, documents, deadline }
  * ---------------------------------------------------------*/
-router.post('/', adminRequired, async (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Ambil info admin dari req.admin yang di-set oleh requireAuthJwt
+    const adminId = req.admin?.id ?? "unknown";
+    const adminUsername = req.admin?.username ?? "unknown"; // Tambahan info jika perlu
+    const adminIp = req.ip || (req.headers["x-forwarded-for"] as string) || "unknown";
+
     const {
-      title, buyer, sector, location, status, contract,
-      budgetUSD, description, documents, deadline,
+      title,
+      buyer,
+      sector,
+      location,
+      status,
+      contract,
+      budgetUSD, // Ini 'number' (berisi IDR) dari frontend
+      description,
+      documents,
+      deadline,
     } = req.body ?? {};
 
+    // Required fields
     if (!title || !buyer || !sector || !status || !contract) {
-      return res.status(400).json({ message: 'Missing required fields' });
+      return res.status(400).json({ message: "Missing required fields: title/buyer/sector/status/contract" });
     }
 
-    // budget input flexible: string like "1.000.000" or number
+    // budget input flexible: string like "1.000.000" or number -> BigInt
     const parseToBigInt = (v: unknown): bigint => {
-      if (typeof v === 'bigint') return v;
-      if (typeof v === 'number') return BigInt(Math.max(0, Math.round(v)));
-      if (typeof v === 'string') {
-        const clean = v.replace(/[^\d-]/g, '');
+      if (v === undefined || v === null) return BigInt(0);
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(Math.max(0, Math.round(v)));
+      if (typeof v === "string") {
+        const clean = v.replace(/[^\d-]/g, "");
         const n = Number(clean || 0);
         return BigInt(Math.max(0, Math.round(isNaN(n) ? 0 : n)));
       }
@@ -66,145 +99,160 @@ router.post('/', adminRequired, async (req: Request, res: Response) => {
         title: String(title),
         buyer: String(buyer),
         sector: sector as any,
-        location: String(location ?? ''),
+        location: String(location ?? ""),
         status: status as any,
         contract: contract as any,
-        budgetUSD: parseToBigInt(budgetUSD) as any,
-        description: description !== undefined ? String(description ?? '') : undefined,
+        budgetUSD: parseToBigInt(budgetUSD) as any, // Konversi number (IDR) ke BigInt
+        description: description !== undefined ? String(description ?? "") : undefined,
         documents: documents !== undefined ? toDocs(documents) : undefined,
-        deadline: deadline ? new Date(deadline) : new Date(),
+        deadline: deadline ? new Date(deadline) : null,
       },
     });
 
-    return res.json(sanitizeTender(created));
+    console.info(`[ADMIN][TENDER][CREATE] admin=${adminId}(${adminUsername}) ip=${adminIp} tender=${created.id}`);
+
+    // Middleware global akan handle BigInt to string
+    return res.status(201).json(created);
   } catch (err: any) {
-    console.error('Create tender error:', err);
-    return res.status(500).json({ message: err?.message ?? 'Internal error' });
+    console.error("Create tender error:", err);
+    next(err); // Teruskan ke global error handler
   }
 });
 
 /* -----------------------------------------------------------
- * List + filter (ADMIN ONLY)
- * GET /admin/tenders
+ * List (ADMIN ONLY)
+ * GET /
  * ---------------------------------------------------------*/
-router.get('/', adminRequired, async (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { q, sector, status, contract } = req.query as Record<string, string | undefined>;
-    const limit = toInt(req.query.limit, 100);
-    const offset = toInt(req.query.offset, 0);
+    const items = await prisma.tender.findMany({
+      orderBy: { createdAt: "desc" }, // Sesuai dengan frontend
+    });
 
-    const where: Prisma.TenderWhereInput = {
-      AND: [
-        q ? {
-          OR: [
-            { title: { contains: q, mode: Prisma.QueryMode.insensitive } },
-            { buyer: { contains: q, mode: Prisma.QueryMode.insensitive } },
-          ],
-        } : undefined,
-        sector ? { sector: sector as any } : undefined,
-        status ? { status: status as any } : undefined,
-        contract ? { contract: contract as any } : undefined,
-      ].filter(Boolean) as Prisma.TenderWhereInput[],
-    };
+    // Frontend Anda (page.tsx) mengharapkan array sederhana.
+    // Middleware global Anda akan menangani konversi BigInt.
+    // Kita tetap map untuk konversi Date jika perlu
+    return res.json(items.map(sanitizeTenderOutput));
 
-    const orderBy: Prisma.TenderOrderByWithRelationInput = { deadline: 'asc' };
-    const [items, total] = await Promise.all([
-      prisma.tender.findMany({
-        where,
-        orderBy,
-        take: Math.max(1, Math.min(1000, limit)),
-        skip: Math.max(0, offset),
-      }),
-      prisma.tender.count({ where }),
-    ]);
-
-    const safe = items.map(sanitizeTender);
-    return res.json({ items: safe, total, limit, offset });
   } catch (err: any) {
-    console.error('List tenders error:', err);
-    return res.status(500).json({ message: err?.message ?? 'Internal error' });
+    console.error("List tenders error:", err);
+    next(err); // Teruskan ke global error handler
   }
 });
 
 /* -----------------------------------------------------------
  * Get detail (ADMIN ONLY)
- * GET /admin/tenders/:id
+ * GET /:id
  * ---------------------------------------------------------*/
-router.get('/:id', adminRequired, async (req: Request, res: Response) => {
+router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = toInt(req.params.id, NaN);
-    if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid id' });
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+
     const item = await prisma.tender.findUnique({ where: { id } });
-    if (!item) return res.status(404).json({ message: 'Not found' });
-    return res.json(sanitizeTender(item));
+    if (!item) return res.status(404).json({ message: "Not found" });
+
+    // Middleware global akan handle BigInt, map untuk Date
+    return res.json(sanitizeTenderOutput(item));
   } catch (err: any) {
-    console.error('Get tender error:', err);
-    return res.status(500).json({ message: err?.message ?? 'Internal error' });
+    console.error("Get tender error:", err);
+    next(err); // Teruskan ke global error handler
   }
 });
 
 /* -----------------------------------------------------------
  * Update (ADMIN ONLY)
- * PATCH /admin/tenders/:id
+ * PUT /:id
  * ---------------------------------------------------------*/
-router.patch('/:id', adminRequired, async (req: Request, res: Response) => {
+router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const adminId = req.admin?.id ?? "unknown";
+    const adminUsername = req.admin?.username ?? "unknown";
+    const adminIp = req.ip || (req.headers["x-forwarded-for"] as string) || "unknown";
+
     const id = toInt(req.params.id, NaN);
-    if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid id' });
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
 
     const {
-      title, buyer, sector, location, status, contract,
-      budgetUSD, description, documents, deadline,
+      title,
+      buyer,
+      sector,
+      location,
+      status,
+      contract,
+      budgetUSD, // Ini 'number' (IDR) dari frontend
+      description,
+      documents,
+      deadline,
     } = req.body ?? {};
-
-    const data: any = {
-      ...(title !== undefined ? { title: String(title) } : {}),
-      ...(buyer !== undefined ? { buyer: String(buyer) } : {}),
-      ...(sector !== undefined ? { sector } : {}),
-      ...(location !== undefined ? { location: String(location) } : {}),
-      ...(status !== undefined ? { status } : {}),
-      ...(contract !== undefined ? { contract } : {}),
-      ...(description !== undefined ? { description: String(description ?? '') } : {}),
-      ...(documents !== undefined ? { documents: toDocs(documents) } : {}),
-      ...(deadline !== undefined ? { deadline: new Date(deadline) } : {}),
+    
+    // Gunakan parser yang sama dengan POST untuk konsistensi
+    const parseToBigInt = (v: unknown): bigint => {
+      if (v === undefined || v === null) return BigInt(0);
+      if (typeof v === "bigint") return v;
+      if (typeof v === "number") return BigInt(Math.max(0, Math.round(v)));
+      if (typeof v === "string") {
+        const clean = v.replace(/[^\d-]/g, "");
+        const n = Number(clean || 0);
+        return BigInt(Math.max(0, Math.round(isNaN(n) ? 0 : n)));
+      }
+      return BigInt(0);
     };
 
-    if (budgetUSD !== undefined) {
-      // convert to BigInt for Prisma
-      let b: bigint;
-      if (typeof budgetUSD === 'bigint') b = budgetUSD;
-      else if (typeof budgetUSD === 'number') b = BigInt(Math.max(0, Math.round(budgetUSD)));
-      else {
-        const clean = String(budgetUSD).replace(/[^\d-]/g, '');
-        const n = Number(clean || 0);
-        b = BigInt(Math.max(0, Math.round(isNaN(n) ? 0 : n)));
-      }
-      data.budgetUSD = b as any;
-    }
+    // Frontend mengirim semua field (bukan patch), jadi kita set semua
+    const data: Prisma.TenderUpdateInput = {
+      title: String(title),
+      buyer: String(buyer),
+      sector: sector as any,
+      location: String(location),
+      status: status as any,
+      contract: contract as any,
+      description: String(description ?? ""),
+      documents: toDocs(documents),
+      deadline: deadline ? new Date(deadline) : null,
+      budgetUSD: parseToBigInt(budgetUSD), // Konversi number (IDR) ke BigInt
+    };
 
     const updated = await prisma.tender.update({ where: { id }, data });
-    return res.json(sanitizeTender(updated));
+
+    console.info(`[ADMIN][TENDER][UPDATE] admin=${adminId}(${adminUsername}) ip=${adminIp} tender=${updated.id}`);
+
+    // Middleware global akan handle BigInt
+    return res.json(updated);
   } catch (err: any) {
-    console.error('Update tender error:', err);
-    if (err?.code === 'P2025') return res.status(404).json({ message: 'Not found' });
-    return res.status(500).json({ message: err?.message ?? 'Internal error' });
+    console.error("Update tender error:", err);
+    if (err?.code === "P2025") return res.status(404).json({ message: "Not found" });
+    next(err); // Teruskan ke global error handler
   }
 });
 
 /* -----------------------------------------------------------
  * Delete (ADMIN ONLY)
- * DELETE /admin/tenders/:id
+ * DELETE /:id
  * ---------------------------------------------------------*/
-router.delete('/:id', adminRequired, async (req: Request, res: Response) => {
-  try { 
+router.delete("/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const adminId = req.admin?.id ?? "unknown";
+    const adminUsername = req.admin?.username ?? "unknown";
+    const adminIp = req.ip || (req.headers["x-forwarded-for"] as string) || "unknown";
+
     const id = toInt(req.params.id, NaN);
-    if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid id' });
+    if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid id" });
+
+    // check existence first (gives nicer error)
+    const existing = await prisma.tender.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ message: "Not found" });
+
     await prisma.tender.delete({ where: { id } });
+
+    console.info(`[ADMIN][TENDER][DELETE] admin=${adminId}(${adminUsername}) ip=${adminIp} tender=${id}`);
+
+    // Ini sudah benar, frontend 'expectJson: false' cocok dengan 204
     return res.status(204).end();
   } catch (err: any) {
-    console.error('Delete tender error:', err);
-    if (err?.code === 'P2025') return res.status(404).json({ message: 'Not found' });
-    return res.status(500).json({ message: err?.message ?? 'Internal error' });
+    console.error("Delete tender error:", err);
+    if (err?.code === "P2025") return res.status(404).json({ message: "Not found" });
+    next(err); // Teruskan ke global error handler
   }
 });
 

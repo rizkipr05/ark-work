@@ -185,7 +185,8 @@
       "remember": "Ingat saya",
       "forgot": "Lupa kata sandi?",
       "signInBtn": "Masuk",
-      "signingIn": "Sedang masuk..."
+      "signingIn": "Sedang masuk...",
+      "signInWithGoogle": "Masuk dengan Google"
     },
     "googleBtn": "Masuk dengan Google",
     "noAccount": "Belum punya akun?",

@@ -185,7 +185,8 @@
       "remember": "Remember me",
       "forgot": "Forgot password?",
       "signInBtn": "Sign In",
-      "signingIn": "Signing in..."
+      "signingIn": "Signing in...",
+      "signInWithGoogle": "Sign in with Google"
     },
     "googleBtn": "Sign in with Google",
     "noAccount": "Don’t have an account?",
